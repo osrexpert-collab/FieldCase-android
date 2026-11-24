@@ -115,7 +115,7 @@ const VAT = 0.18; // מע"מ בישראל מינואר 2025
 const AREAS = ["חזית","אחור","צד ימין","צד שמאל","גג","פנים הרכב","מכסה מנוע","לוחית רישוי","מד קילומטרים","מספר שלדה","מסמכים","אחר"];
 const KINDS = ["חלפים","עבודה","צבע","אחר"];
 const STATUS = {draft:"טיוטה",checked:"נבדק",sent:"נשלח"};
-const fmt = new Intl.NumberFormat("he-IL",{style:"currency",currency:"ILS",maximumFractionDigits:0});
+const fmt = new Intl.NumberFormat("he-IL",{style:"currency",currency:"ILS",minimumFractionDigits:0,maximumFractionDigits:0});
 const esc = s => String(s ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const today = () => new Date().toISOString().slice(0,10);
