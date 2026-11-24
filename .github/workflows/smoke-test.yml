@@ -1,0 +1,56 @@
+name: Smoke test on emulator
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build debug APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install and launch on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: |
+            adb install -r app/build/outputs/apk/debug/app-debug.apk && echo "INSTALL_OK"
+            adb logcat -c
+            adb shell am start -W -n il.shamai.field/.MainActivity
+            sleep 25
+            echo "PID: $(adb shell pidof il.shamai.field || echo NOT_RUNNING)"
+            adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity" || true
+            echo "===== crashes ====="
+            adb logcat -d -b crash || true
+            echo "===== app / webview log ====="
+            adb logcat -d | grep -E "AndroidRuntime|FATAL|chromium|Console|il\.shamai\.field|WebView" | tail -150 || true
+            adb exec-out screencap -p > screen.png || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-screenshot
+          path: screen.png
+          if-no-files-found: ignore
