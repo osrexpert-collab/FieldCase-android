@@ -120,6 +120,14 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",
 const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const today = () => new Date().toISOString().slice(0,10);
 const $ = id => document.getElementById(id);
+const GOV_RES = "053cea08-09bc-40ec-8f7a-156f0677aff3"; // data.gov.il: כלי רכב פרטיים ומסחריים פעילים
+const fmtDate = s => {const m=String(s||"").match(/^(\d{4})-(\d{2})-(\d{2})/);return m?`${m[3]}/${m[2]}/${m[1]}`:String(s||"");};
+
+/* ---------- appraiser profile (global, on this device) ---------- */
+const PKEY="fieldcase.profile";
+const PROFILE_FIELDS=[["appraiserName","שם השמאי"],["appraiserLicense","מספר רישיון שמאי","dir=\"ltr\" inputmode=\"numeric\""],["officeName","שם משרד השמאות"],["officeLicense","מספר רישיון / אישור של המשרד","dir=\"ltr\""]];
+let profile=(()=>{try{return JSON.parse(localStorage.getItem(PKEY)||"{}")||{}}catch{return {}}})();
+function saveProfile(){try{localStorage.setItem(PKEY,JSON.stringify(profile));return true}catch{return false}}
 
 /* ---------- state ---------- */
 let cases = {};          // id -> case
@@ -135,7 +143,7 @@ function newCase(){
   return {id:uid(),status:"draft",createdAt:Date.now(),updatedAt:Date.now(),
     plate:"",make:"",model:"",year:"",km:"",color:"",vin:"",
     owner:"",phone:"",insurer:"",claimNo:"",eventDate:"",inspDate:today(),inspPlace:"",
-    photos:[],notes:"",dictation:"",costs:[]};
+    photos:[],notes:"",dictation:"",costs:[],reg:null};
 }
 const totals = c => {const sub=(c.costs||[]).reduce((s,r)=>s+(Number(r.amount)||0),0);return {sub,vat:sub*VAT,total:sub*(1+VAT)};};
 function fmtPlate(p){const d=String(p||"").replace(/\D/g,"");if(d.length===7)return d.slice(0,2)+"-"+d.slice(2,5)+"-"+d.slice(5);if(d.length===8)return d.slice(0,3)+"-"+d.slice(3,5)+"-"+d.slice(5);return p||"";}
@@ -238,8 +246,13 @@ function render(){
       <span class="muted">פתח תיק כשאתה מגיע לרכב: צלם את הלוחית והנזקים, הכתב הערות ואומדן, ובסוף הפק דוח שטח עם התמונות.</span></div>`)}
     </div>
   </section>
+  <section class="card">
+    <div class="row"><h2 style="flex:1">השמאי והמשרד</h2><button id="prof">${profileSummary()?"עריכה":"הוסף פרטים"}</button></div>
+    <p class="${profileSummary()?"":"muted"}" style="margin:0">${esc(profileSummary())||"עוד לא הוזנו. שם השמאי, מספר הרישיון ופרטי המשרד יופיעו בכל דוח שטח."}</p>
+  </section>
   <p class="note">${mode==="cloud"?"התיקים נשמרים בחשבון שלך ונגישים מכל מכשיר. רק אתה רואה אותם.":mode==="local"?(window.Native?"התיקים והתמונות נשמרים בטלפון הזה בלבד. כדאי לשמור גיבוי של תיקים חשובים.":"התיקים נשמרים בדפדפן הזה בלבד. כדאי לייצא גיבוי מדי פעם."):"אין כאן אחסון. ייצא גיבוי לפני שאתה סוגר את הדף."}</p>`;
   $("new").onclick=()=>{const c=newCase();persist(c);go(c.id)};
+  $("prof").onclick=profileDialog;
   const qi=$("q");qi.oninput=()=>{render.q=qi.value;const p=qi.selectionStart;render();const n=$("q");n.focus();n.setSelectionRange(p,p)};
   app.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>go(b.dataset.open));
 }
@@ -256,6 +269,7 @@ function caseView(c){
     <div class="row"><h2 style="flex:1">פרטי הרכב</h2><span id="platePrev">${plateHtml(c.plate)}</span></div>
     <div class="row">
       ${(img||cap.plate)?`<button id="plateCam">צלם לוחית וזהה מספר</button>`:""}
+      <button id="regBtn">משוך נתוני רכב לפי המספר</button>
       <span id="plateMsg" class="note">${cap.plate?"המספר מזוהה בטלפון עצמו. כדאי לבדוק אותו.":img?"Claude יקרא את המספר מהתמונה. כדאי לבדוק אותו.":""}</span>
     </div>
     <div class="grid2">
@@ -265,6 +279,7 @@ function caseView(c){
       ${F(c,"km","קילומטראז׳","text",'inputmode="numeric"')}
       ${F(c,"color","צבע")}${F(c,"vin","מספר שלדה","text",'dir="ltr"')}
     </div>
+    ${regHtml(c)}
   </section>
 
   <section class="card">
@@ -349,6 +364,10 @@ function bindCase(c){
   $("addCam").onclick=()=>$("fileCam").click();
   $("addGal").onclick=()=>$("fileGal").click();
   if($("plateCam")) $("plateCam").onclick=()=>cap.plate?readPlateNative():$("filePlate").click();
+  $("regBtn").onclick=()=>lookupVehicle(c,true);
+  $("f_plate").addEventListener("change",()=>{const d=String(c.plate||"").replace(/\D/g,"");
+    if((d.length===7||d.length===8)&&(!c.reg||c.reg.plate!==d))lookupVehicle(c,false)});
+  $("f_plate").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();e.target.blur();lookupVehicle(c,true)}});
   if($("gpsBtn")) $("gpsBtn").onclick=()=>locateCase(c);
   app.querySelectorAll(".ph").forEach(el=>{
     const p=c.photos.find(x=>x.id===el.dataset.pid); if(!p)return;
@@ -363,6 +382,68 @@ function bindCase(c){
   $("del").onclick=()=>confirmBox(`למחוק את התיק ${fmtPlate(c.plate)||""}? אי אפשר לבטל.`,"מחק",async()=>{
     if(cap.assets) for(const p of c.photos) if(p.assetId) try{await cap.assets.delete(p.assetId)}catch{}
     await removeCase(c.id);go(null)});
+}
+
+/* ---------- vehicle registry (data.gov.il, משרד התחבורה) ---------- */
+function regHtml(c){
+  const r=c.reg; if(!r)return `<p class="note" id="regMsg"></p>`;
+  const parts=[["סוג דלק",r.fuel],["רמת גימור",r.trim],["בעלות",r.ownership],["טסט אחרון",fmtDate(r.lastTest)],["רישיון בתוקף עד",fmtDate(r.validUntil)],["עלייה לכביש",r.onRoad]].filter(x=>x[1]);
+  return `<p class="note" id="regMsg"></p><p class="note" style="margin-top:0">נתוני משרד התחבורה למספר ${esc(fmtPlate(r.plate))}, נמשכו ${new Date(r.fetchedAt).toLocaleDateString("he-IL")}${parts.length?": "+parts.map(x=>esc(x[0]+" "+x[1])).join(" · "):""}</p>`;
+}
+async function fetchVehicle(d){
+  if(window.Native&&Native.vehicleLookup){
+    const body=await NB.call("vehicleLookup",d);
+    const j=JSON.parse(body); if(!j||!j.success)throw {code:"bad_response"};
+    return (j.result.records||[])[0]||null;
+  }
+  const url="https://data.gov.il/api/3/action/datastore_search?resource_id="+GOV_RES+"&limit=1&filters="+encodeURIComponent(JSON.stringify({mispar_rechev:d}));
+  const res=await fetch(url,{headers:{Accept:"application/json"}}); if(!res.ok)throw {code:"http"};
+  const j=await res.json(); if(!j||!j.success)throw {code:"bad_response"};
+  return (j.result.records||[])[0]||null;
+}
+async function lookupVehicle(c,manual){
+  const d=String(c.plate||"").replace(/\D/g,""), msg=()=>$("regMsg"), btn=$("regBtn");
+  if(d.length!==7&&d.length!==8){if(manual&&msg())msg().textContent="הקלד מספר רישוי מלא, 7 או 8 ספרות.";return}
+  if(lookupVehicle.busy)return; lookupVehicle.busy=true;
+  if(btn){btn.disabled=true;btn.textContent="מחפש…"}
+  if(msg())msg().textContent="מחפש במאגר משרד התחבורה…";
+  let note="";
+  try{
+    const rec=await fetchVehicle(d);
+    if(!rec) note="המספר לא נמצא במאגר של משרד התחבורה (רכבים פרטיים ומסחריים פעילים). אפשר למלא את הפרטים ידנית.";
+    else{
+      const set=(k,v)=>{v=String(v??"").trim();if(v)c[k]=v};
+      if(String(c.plate).replace(/\D/g,"")===d){
+        set("make",rec.tozeret_nm); set("model",rec.kinuy_mishari||rec.degem_nm); set("year",rec.shnat_yitzur);
+        set("color",rec.tzeva_rechev); set("vin",rec.misgeret);
+        c.plate=fmtPlate(d);
+        c.reg={plate:d,fetchedAt:Date.now(),fuel:rec.sug_delek_nm||"",trim:rec.ramat_gimur||"",modelCode:rec.degem_nm||"",
+          ownership:rec.baalut||"",lastTest:rec.mivchan_acharon_dt||"",validUntil:rec.tokef_dt||"",onRoad:rec.moed_aliya_lakvish||""};
+        persist(c); note="הנתונים נמשכו ממאגר משרד התחבורה. בדוק שהם תואמים לרכב.";
+      }
+    }
+  }catch(e){note="לא הצלחתי להתחבר למאגר משרד התחבורה. בדוק חיבור לאינטרנט ונסה שוב."}
+  finally{lookupVehicle.busy=false}
+  if(current===c.id){render();if(msg())msg().textContent=note}
+}
+
+/* ---------- appraiser profile dialog ---------- */
+function profileSummary(){
+  const a=[profile.appraiserName,profile.appraiserLicense&&("רישיון "+profile.appraiserLicense)].filter(Boolean).join(", ");
+  const o=[profile.officeName,profile.officeLicense&&("רישיון "+profile.officeLicense)].filter(Boolean).join(", ");
+  return [a,o].filter(Boolean).join(" · ");
+}
+function profileDialog(){
+  const ov=document.createElement("div");ov.className="ov";ov.setAttribute("role","dialog");ov.setAttribute("aria-label","פרטי השמאי והמשרד");
+  ov.innerHTML=`<div class="box" style="max-width:460px"><h2>פרטי השמאי והמשרד</h2>
+    <div style="display:grid;gap:10px">${PROFILE_FIELDS.map(([k,l,x])=>`<label for="p_${k}">${l}<input id="p_${k}" value="${esc(profile[k]||"")}" ${x||""}></label>`).join("")}</div>
+    <p class="note">נשמר בטלפון הזה ומופיע בראש כל דוח שטח ובשורת החתימה.</p>
+    <div class="row"><button class="primary" id="pSave">שמור</button><button id="pNo">ביטול</button></div></div>`;
+  document.body.appendChild(ov);
+  $("pNo").onclick=()=>ov.remove(); ov.onclick=e=>{if(e.target===ov)ov.remove()};
+  $("pSave").onclick=()=>{for(const [k] of PROFILE_FIELDS)profile[k]=$("p_"+k).value.trim();
+    if(!saveProfile())toast("השמירה נכשלה."); else toast("הפרטים נשמרו.");ov.remove();render()};
+  $("p_appraiserName").focus();
 }
 
 /* ---------- photos ---------- */
@@ -435,6 +516,7 @@ async function readPlate(file){
   render();
   if(cap.assets){try{const a=await cap.assets.upload(blob);p.assetId=a.id;p.src=a.url||("/_blob/"+a.id)}catch{}p.uploading=false}
   persist(c);render();
+  {const d=String(c.plate||"").replace(/\D/g,"");if(d.length===7||d.length===8)lookupVehicle(c,false)}
 }
 function aiError(e){
   const m={not_granted:"לא אושר שימוש ב-Claude בדף הזה.",rate_limited:"יותר מדי בקשות כרגע. נסה שוב בעוד דקה.",refused:"Claude לא ענה על הבקשה הזו.",invalid_json:"התשובה לא הובנה. נסה שוב.",image_rejected:"התמונה לא התקבלה. נסה תמונה אחרת.",session_expired:"צריך להתחבר מחדש ל-Claude."};
@@ -498,9 +580,12 @@ th{width:34%;font-weight:600;color:#444}.est th{width:auto}.num{font-variant-num
 figcaption{font-size:12px;color:#333;white-space:pre-wrap}.sig{margin-top:40px;display:flex;justify-content:space-between}
 .plate{direction:ltr;display:inline-block;background:#f7d117;border:2px solid #111;border-radius:4px;padding:2px 10px;font-weight:700}
 @media print{body{margin:0}h2{break-after:avoid}}</style></head><body>
+${profile.officeName?`<div style="font-weight:700;font-size:15px">${esc(profile.officeName)}${profile.officeLicense?` <span style="font-weight:400">· רישיון משרד מס׳ ${esc(profile.officeLicense)}</span>`:""}</div>`:""}
 <h1>דוח בדיקת רכב בשטח</h1>
 <div>רכב <span class="plate">${esc(fmtPlate(c.plate)||"—")}</span> · הופק ${new Date().toLocaleDateString("he-IL")}</div>
-<h2>פרטי הרכב</h2><table>${kv("מספר רישוי",fmtPlate(c.plate))}${kv("יצרן ודגם",[c.make,c.model].filter(Boolean).join(" "))}${kv("שנת ייצור",c.year)}${kv("קילומטראז׳",c.km)}${kv("צבע",c.color)}${kv("מספר שלדה",c.vin)}</table>
+<h2>פרטי הרכב</h2><table>${kv("מספר רישוי",fmtPlate(c.plate))}${kv("יצרן ודגם",[c.make,c.model].filter(Boolean).join(" "))}${kv("שנת ייצור",c.year)}${kv("קילומטראז׳",c.km)}${kv("צבע",c.color)}${kv("מספר שלדה",c.vin)}${c.reg?kv("סוג דלק",c.reg.fuel)+kv("רמת גימור",c.reg.trim)+kv("בעלות",c.reg.ownership)+kv("טסט אחרון",fmtDate(c.reg.lastTest))+kv("רישיון רכב בתוקף עד",fmtDate(c.reg.validUntil))+kv("עלייה לכביש",c.reg.onRoad):""}</table>
+${c.reg?`<p style="font-size:11px;color:#666;margin:4px 0 0">נתוני רישום ממאגר משרד התחבורה (data.gov.il), נמשכו ב-${new Date(c.reg.fetchedAt).toLocaleDateString("he-IL")}.</p>`:""}
+${(profile.appraiserName||profile.appraiserLicense||profile.officeName||profile.officeLicense)?`<h2>פרטי השמאי</h2><table>${kv("שם השמאי",profile.appraiserName)}${kv("מספר רישיון שמאי",profile.appraiserLicense)}${kv("משרד שמאות",profile.officeName)}${kv("מספר רישיון / אישור משרד",profile.officeLicense)}</table>`:""}
 <h2>פרטי התיק</h2><table>${kv("בעלים",c.owner)}${kv("טלפון",c.phone)}${kv("חברת ביטוח",c.insurer)}${kv("מספר תביעה",c.claimNo)}${kv("תאריך האירוע",c.eventDate)}${kv("תאריך הבדיקה",c.inspDate)}${kv("מקום הבדיקה",c.inspPlace)}${c.gps?kv("קואורדינטות",c.gps.lat.toFixed(5)+", "+c.gps.lng.toFixed(5)+(c.gps.acc?` (±${Math.round(c.gps.acc)} מ׳)`:"")):""}</table>
 ${c.notes?`<h2>הערות השמאי</h2><p style="white-space:pre-wrap">${esc(c.notes)}</p>`:""}
 ${(c.costs||[]).length?`<h2>אומדן נזק</h2><table class="est"><tr><th>תיאור</th><th>סוג</th><th class="num">סכום</th></tr>
@@ -509,7 +594,7 @@ ${c.costs.map(r=>`<tr><td>${esc(r.desc)}</td><td>${esc(r.kind)}</td><td class="n
 <tr><td colspan="2">מע״מ ${VAT*100}%</td><td class="num">${fmt.format(t.vat)}</td></tr>
 <tr><td colspan="2"><b>סה״כ כולל מע״מ</b></td><td class="num"><b>${fmt.format(t.total)}</b></td></tr></table>`:""}
 ${byArea.length?`<h2>תמונות (${imgs.filter(x=>x.u).length})</h2>${byArea.map(g=>`<h3 style="font-size:14px;margin:12px 0 6px">${esc(g[0].p.area)}</h3><div class="ph">${g.map(x=>`<figure><img src="${x.u}" alt="${esc(x.p.area)}"><figcaption>${new Date(x.p.ts).toLocaleString("he-IL")}${x.p.gps?" · "+x.p.gps.lat.toFixed(5)+", "+x.p.gps.lng.toFixed(5):""}${x.p.caption?"\n"+esc(x.p.caption):""}</figcaption></figure>`).join("")}</div>`).join("")}`:""}
-<div class="sig"><span>שם השמאי: ____________________</span><span>חתימה: ____________________</span></div>
+<div class="sig"><span>שם השמאי: ${profile.appraiserName?esc(profile.appraiserName):"____________________"}${profile.appraiserLicense?` · רישיון מס׳ ${esc(profile.appraiserLicense)}`:""}</span><span>חתימה: ____________________</span></div>
 <p style="font-size:11px;color:#666;margin-top:24px">דוח שטח לתיעוד ראשוני. אינו מהווה חוות דעת שמאית חתומה.</p>
 </body></html>`;
 }
@@ -607,7 +692,8 @@ async function readPlateNative(){
       try{const a=await cap.assets.upload(blob);p.assetId=a.id;p.src=a.url}catch{}p.uploading=false}
     const d=String(r.plate||"").replace(/\D/g,"");
     if(d.length===7||d.length===8){c.plate=fmtPlate(d);persist(c);render();
-      $("plateMsg").textContent=r.confidence==="high"?"זוהה מספר. בדוק שהוא תואם לרכב.":"זוהה מספר בוודאות נמוכה. בדוק אותו מול הרכב."}
+      $("plateMsg").textContent=r.confidence==="high"?"זוהה מספר. בדוק שהוא תואם לרכב.":"זוהה מספר בוודאות נמוכה. בדוק אותו מול הרכב.";
+      lookupVehicle(c,false)}
     else{persist(c);render();$("plateMsg").textContent="לא הצלחתי לקרוא את המספר. הקלד אותו ידנית. התמונה נשמרה."}
   }catch(e){msg.textContent=e&&e.code==="not_granted"?"אין הרשאת מצלמה.":"הזיהוי נכשל. הקלד את המספר ידנית."}
 }

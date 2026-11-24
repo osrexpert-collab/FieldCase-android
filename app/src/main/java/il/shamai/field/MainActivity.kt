@@ -41,6 +41,9 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -59,6 +62,8 @@ class MainActivity : ComponentActivity() {
     private val host = "appassets.androidplatform.net"
     private val blobDir by lazy { File(filesDir, "blobs").apply { mkdirs() } }
     private val io = Executors.newSingleThreadExecutor()
+    private val net = Executors.newSingleThreadExecutor()
+    @Volatile private var userAgent: String = "Mozilla/5.0 (Linux; Android) FieldCase"
 
     // file chooser (<input type=file>)
     private var fileCallback: ValueCallback<Array<Uri>>? = null
@@ -113,6 +118,7 @@ class MainActivity : ComponentActivity() {
             allowContentAccess = true
             mediaPlaybackRequiresUserGesture = true
         }
+        userAgent = web.settings.userAgentString ?: userAgent
         web.addJavascriptInterface(Bridge(), "Native")
         web.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
@@ -157,6 +163,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         speech?.destroy()
         io.shutdown()
+        net.shutdown()
         super.onDestroy()
     }
 
@@ -392,6 +399,35 @@ class MainActivity : ComponentActivity() {
         runOnUiThread { startActivity(Intent.createChooser(send, "שתף")) }
     }
 
+    // ---------- vehicle registry (data.gov.il) ----------
+
+    /** שולף רשומת רכב ממאגר משרד התחבורה ומחזיר את תשובת ה-API כמחרוזת JSON */
+    private fun vehicleLookup(cb: String, plate: String) {
+        val d = plate.filter { it.isDigit() }
+        if (d.length != 7 && d.length != 8) { reject(cb, "bad_plate"); return }
+        var con: HttpURLConnection? = null
+        try {
+            val filters = URLEncoder.encode("{\"mispar_rechev\":\"$d\"}", "UTF-8")
+            val url = URL("https://data.gov.il/api/3/action/datastore_search" +
+                "?resource_id=053cea08-09bc-40ec-8f7a-156f0677aff3&limit=1&filters=$filters")
+            con = (url.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 10000
+                readTimeout = 15000
+                setRequestProperty("User-Agent", userAgent)
+                setRequestProperty("Accept", "application/json")
+            }
+            val code = con.responseCode
+            if (code !in 200..299) { reject(cb, "http_$code"); return }
+            val body = con.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val literal = JSONObject.quote(body).replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+            resolve(cb, literal)
+        } catch (e: Exception) {
+            reject(cb, "network")
+        } finally {
+            con?.disconnect()
+        }
+    }
+
     // ---------- the JavaScript bridge ----------
 
     inner class Bridge {
@@ -425,6 +461,10 @@ class MainActivity : ComponentActivity() {
                 val where = saveToDownloads(name, mime, content.toByteArray(Charsets.UTF_8))
                 resolve(cb, JSONObject().put("status", "saved").put("where", where).toString())
             } catch (e: Exception) { reject(cb, "save_failed") }
+        }
+
+        @JavascriptInterface fun vehicleLookup(cb: String, plate: String) = net.execute {
+            this@MainActivity.vehicleLookup(cb, plate)
         }
 
         @JavascriptInterface fun shareFile(name: String, mime: String, content: String) = io.execute {
