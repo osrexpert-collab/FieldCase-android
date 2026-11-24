@@ -2,12 +2,18 @@ package il.shamai.field
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.ContentValues
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.pdf.PdfDocument
 import android.location.Geocoder
 import android.location.Location
 import android.location.LocationManager
@@ -15,11 +21,15 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.util.Base64
+import android.util.Log
+import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -41,12 +51,15 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Executors
+import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 /**
  * מעטפת אנדרואיד לאפליקציית השטח.
@@ -101,6 +114,7 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WebView.enableSlowWholeDocumentDraw()
         web = WebView(this)
         setContentView(web)
 
@@ -152,7 +166,11 @@ class MainActivity : ComponentActivity() {
         })
 
         if (savedInstanceState != null) web.restoreState(savedInstanceState)
-        else web.loadUrl("https://$host/assets/www/index.html")
+        else {
+            val debuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            val selfTest = debuggable && intent?.getStringExtra("selftest") == "pdf"
+            web.loadUrl("https://$host/assets/www/index.html" + if (selfTest) "#selftest-pdf" else "")
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -389,14 +407,168 @@ class MainActivity : ComponentActivity() {
     private fun share(name: String, mime: String, bytes: ByteArray) {
         val dir = File(cacheDir, "share").apply { mkdirs() }
         val f = File(dir, safeName(name)).apply { writeBytes(bytes) }
+        shareExisting(f, name, mime)
+    }
+
+    private fun shareExisting(f: File, name: String, mime: String) {
         val uri = FileProvider.getUriForFile(this, "$packageName.files", f)
         val send = Intent(Intent.ACTION_SEND).apply {
             type = mime
             putExtra(Intent.EXTRA_STREAM, uri)
             putExtra(Intent.EXTRA_SUBJECT, name)
+            clipData = ClipData.newRawUri(name, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         runOnUiThread { startActivity(Intent.createChooser(send, "שתף")) }
+    }
+
+    /** פותח את אפליקציית המייל של הטלפון עם הקובץ מצורף. אם אין אפליקציית מייל, פותח שיתוף רגיל. */
+    private fun emailFile(f: File, name: String, to: String, subject: String, body: String) {
+        val uri = FileProvider.getUriForFile(this, "$packageName.files", f)
+        val tos = to.split(',', ';', ' ').map { it.trim() }.filter { it.contains('@') }.toTypedArray()
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            if (tos.isNotEmpty()) putExtra(Intent.EXTRA_EMAIL, tos)
+            putExtra(Intent.EXTRA_SUBJECT, subject)
+            putExtra(Intent.EXTRA_TEXT, body)
+            clipData = ClipData.newRawUri(name, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            selector = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:"))
+        }
+        try {
+            startActivity(send)
+        } catch (e: ActivityNotFoundException) {
+            send.selector = null
+            startActivity(Intent.createChooser(send, "שלח"))
+        }
+    }
+
+    // ---------- PDF (A4, from the report HTML) ----------
+
+    private var pdfBusy = false
+    private val ui = Handler(Looper.getMainLooper())
+
+    /** סקריפט שמזיז שורות, כותרות ותמונות שחוצות גבול עמוד לתחילת העמוד הבא */
+    private val paginateJs = """
+        (function(H){
+          function run(){
+            var atoms=document.querySelectorAll('h1,h2,h3,p,tr,figure,.sig,.keep');
+            for(var i=0;i<atoms.length;i++){
+              var el=atoms[i], r=el.getBoundingClientRect(), top=r.top+window.scrollY, h=r.height;
+              if(h<=0||h>=H) continue;
+              var y=top%H, need=/^H[1-3]$/.test(el.tagName)?Math.min(h+90,H-1):h;
+              if(y+need>H-1){
+                var push=H-y+1;
+                if(el.tagName==='TR'){for(var j=0;j<el.children.length;j++){var td=el.children[j];td.style.paddingTop=(parseFloat(getComputedStyle(td).paddingTop)+push)+'px';}}
+                else el.style.marginTop=(parseFloat(getComputedStyle(el).marginTop)+push)+'px';
+              }
+            }
+            FieldPdf.ready(Math.max(document.documentElement.scrollHeight,document.body.scrollHeight));
+          }
+          var imgs=[].slice.call(document.images).filter(function(i){return !i.complete;});
+          if(!imgs.length) run(); else {var n=imgs.length;imgs.forEach(function(i){i.onload=i.onerror=function(){if(--n===0)run();};});}
+        })(__H__);
+    """.trimIndent()
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun htmlToPdf(html: String, out: File, done: (Int) -> Unit, fail: (String) -> Unit) {
+        val density = resources.displayMetrics.density
+        val pageW = 595; val pageH = 842; val margin = 28f            // A4 בנקודות
+        val printW = pageW - 2 * margin; val printH = pageH - 2 * margin
+        val wPx = (720 * density).roundToInt()                         // רוחב 720px של CSS
+        val scale = printW / wPx                                        // נקודות לפיקסל
+        val slicePx = printH / scale                                    // גובה עמוד בפיקסלים
+        val sliceCss = slicePx / density
+        val pw = WebView(this)
+        var finished = false
+        fun finish(block: () -> Unit) { if (finished) return; finished = true; try { block() } finally { ui.post { pw.destroy() } } }
+        val timeout = Runnable { finish { fail("timeout") } }
+
+        class PdfJs {
+            @JavascriptInterface fun ready(hCss: Double) = ui.post {
+                if (finished) return@post
+                ui.removeCallbacks(timeout)
+                val totalPx = ceil(hCss * density).toInt().coerceAtLeast(1)
+                pw.measure(View.MeasureSpec.makeMeasureSpec(wPx, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(totalPx, View.MeasureSpec.EXACTLY))
+                pw.layout(0, 0, wPx, totalPx)
+                ui.postDelayed({
+                    finish {
+                        val doc = PdfDocument()
+                        try {
+                            var pages = ceil(totalPx / slicePx).toInt().coerceAtLeast(1)
+                            if (pages > 1 && totalPx - (pages - 1) * slicePx < 4) pages--
+                            val foot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.GRAY; textSize = 8f; textAlign = Paint.Align.CENTER }
+                            for (i in 0 until pages) {
+                                val page = doc.startPage(PdfDocument.PageInfo.Builder(pageW, pageH, i + 1).create())
+                                val c = page.canvas
+                                c.save()
+                                c.translate(margin, margin)
+                                c.clipRect(0f, 0f, printW, printH)
+                                c.scale(scale, scale)
+                                c.translate(0f, -i * slicePx)
+                                pw.draw(c)
+                                c.restore()
+                                if (pages > 1) c.drawText("${i + 1} / $pages", pageW / 2f, pageH - 12f, foot)
+                                doc.finishPage(page)
+                            }
+                            FileOutputStream(out).use { doc.writeTo(it) }
+                            done(pages)
+                        } catch (e: Exception) {
+                            Log.e("FieldCase", "pdf draw failed", e)
+                            fail("draw_failed")
+                        } finally {
+                            doc.close()
+                        }
+                    }
+                }, 400)
+            }
+        }
+
+        pw.settings.apply {
+            javaScriptEnabled = true
+            useWideViewPort = false
+            loadWithOverviewMode = false
+            textZoom = 100
+            allowFileAccess = false
+            blockNetworkLoads = true
+        }
+        pw.addJavascriptInterface(PdfJs(), "FieldPdf")
+        pw.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
+            override fun onPageFinished(view: WebView, url: String) {
+                view.evaluateJavascript(paginateJs.replace("__H__", sliceCss.toString()), null)
+            }
+        }
+        pw.measure(View.MeasureSpec.makeMeasureSpec(wPx, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(slicePx.toInt(), View.MeasureSpec.EXACTLY))
+        pw.layout(0, 0, wPx, slicePx.toInt())
+        ui.postDelayed(timeout, 45000)
+        pw.loadDataWithBaseURL("https://$host/", html, "text/html", "utf-8", null)
+    }
+
+    private fun makePdf(cb: String, html: String, name: String, action: String, to: String, subject: String, body: String) {
+        if (pdfBusy) { reject(cb, "busy"); return }
+        pdfBusy = true
+        val safe = safeName(name).let { if (it.endsWith(".pdf", true)) it else "$it.pdf" }
+        val f = File(File(cacheDir, "share").apply { mkdirs() }, safe)
+        htmlToPdf(html, f, { pages ->
+            pdfBusy = false
+            val res = JSONObject().put("pages", pages).put("bytes", f.length()).put("name", safe)
+            Log.i("FieldCase", "PDF $safe pages=$pages bytes=${f.length()}")
+            try {
+                when (action) {
+                    "save" -> io.execute {
+                        try { resolve(cb, res.put("where", saveToDownloads(safe, "application/pdf", f.readBytes())).toString()) }
+                        catch (e: Exception) { reject(cb, "save_failed") }
+                    }
+                    "email" -> { emailFile(f, safe, to, subject, body); resolve(cb, res.toString()) }
+                    "share" -> { shareExisting(f, safe, "application/pdf"); resolve(cb, res.toString()) }
+                    else -> resolve(cb, res.toString())
+                }
+            } catch (e: Exception) { reject(cb, "open_failed") }
+        }, { code -> pdfBusy = false; reject(cb, code) })
     }
 
     // ---------- vehicle registry (data.gov.il) ----------
@@ -462,6 +634,9 @@ class MainActivity : ComponentActivity() {
                 resolve(cb, JSONObject().put("status", "saved").put("where", where).toString())
             } catch (e: Exception) { reject(cb, "save_failed") }
         }
+
+        @JavascriptInterface fun makePdf(cb: String, html: String, name: String, action: String, to: String, subject: String, body: String) =
+            runOnUiThread { this@MainActivity.makePdf(cb, html, name, action, to, subject, body) }
 
         @JavascriptInterface fun vehicleLookup(cb: String, plate: String) = net.execute {
             this@MainActivity.vehicleLookup(cb, plate)

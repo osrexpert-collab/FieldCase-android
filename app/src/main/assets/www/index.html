@@ -125,7 +125,7 @@ const fmtDate = s => {const m=String(s||"").match(/^(\d{4})-(\d{2})-(\d{2})/);re
 
 /* ---------- appraiser profile (global, on this device) ---------- */
 const PKEY="fieldcase.profile";
-const PROFILE_FIELDS=[["appraiserName","שם השמאי"],["appraiserLicense","מספר רישיון שמאי","dir=\"ltr\" inputmode=\"numeric\""],["officeName","שם משרד השמאות"],["officeLicense","מספר רישיון / אישור של המשרד","dir=\"ltr\""]];
+const PROFILE_FIELDS=[["appraiserName","שם השמאי"],["appraiserLicense","מספר רישיון שמאי","dir=\"ltr\" inputmode=\"numeric\""],["officeName","שם משרד השמאות"],["officeLicense","מספר רישיון / אישור של המשרד","dir=\"ltr\""],["officePhone","טלפון המשרד","type=\"tel\" dir=\"ltr\""],["officeEmail","מייל המשרד","type=\"email\" dir=\"ltr\""]];
 let profile=(()=>{try{return JSON.parse(localStorage.getItem(PKEY)||"{}")||{}}catch{return {}}})();
 function saveProfile(){try{localStorage.setItem(PKEY,JSON.stringify(profile));return true}catch{return false}}
 
@@ -142,7 +142,7 @@ function toast(msg,ms=3200){const t=$("toast");t.textContent=msg;t.classList.rem
 function newCase(){
   return {id:uid(),status:"draft",createdAt:Date.now(),updatedAt:Date.now(),
     plate:"",make:"",model:"",year:"",km:"",color:"",vin:"",
-    owner:"",phone:"",insurer:"",claimNo:"",eventDate:"",inspDate:today(),inspPlace:"",
+    owner:"",phone:"",email:"",insurer:"",claimNo:"",eventDate:"",inspDate:today(),inspPlace:"",
     photos:[],notes:"",dictation:"",costs:[],reg:null};
 }
 const totals = c => {const sub=(c.costs||[]).reduce((s,r)=>s+(Number(r.amount)||0),0);return {sub,vat:sub*VAT,total:sub*(1+VAT)};};
@@ -286,6 +286,7 @@ function caseView(c){
     <h2>פרטי התיק</h2>
     <div class="grid2">
       ${F(c,"owner","שם הבעלים")}${F(c,"phone","טלפון","tel",'dir="ltr"')}
+      ${F(c,"email","מייל לשליחת מסמכים","email",'dir="ltr" placeholder="למשל מייל חברת הביטוח או המוסך"')}
       ${F(c,"insurer","חברת ביטוח")}${F(c,"claimNo","מספר תביעה",'text','dir="ltr"')}
       ${F(c,"eventDate","תאריך האירוע","date")}${F(c,"inspDate","תאריך הבדיקה","date")}
       ${F(c,"inspPlace","מקום הבדיקה (מוסך / כתובת)")}
@@ -325,10 +326,11 @@ function caseView(c){
     <h2>סיום</h2>
     <div class="sticky-actions">
       <button class="primary" id="report">הפק דוח שטח</button>
+      <button class="primary" id="quote">הצעת תיקון</button>
       <button id="backup">גיבוי התיק (JSON)</button>
       <button class="danger" id="del">מחק תיק</button>
     </div>
-    <p class="note">דוח השטח כולל פרטי רכב ותיק, תמונות לפי אזור, הערות ואומדן עם מע״מ ${VAT*100}%. הוא נועד לתיעוד בשטח, ואינו חוות דעת חתומה.</p>
+    <p class="note">דוח השטח כולל פרטי רכב ותיק, תמונות לפי אזור, הערות ואומדן עם מע״מ ${VAT*100}%. הצעת התיקון כוללת את פרטי הרכב והתיק ואת פירוט העלויות, בלי תמונות. ${window.Native?"את שניהם אפשר לשמור כ-PDF או לשלוח במייל מהטלפון.":""}</p>
   </section>`;
 }
 const totHtml=t=>`<span>סה״כ לפני מע״מ</span><span>${fmt.format(t.sub)}</span><span>מע״מ ${VAT*100}%</span><span>${fmt.format(t.vat)}</span><span class="g">סה״כ</span><span class="g">${fmt.format(t.total)}</span>`;
@@ -376,7 +378,8 @@ function bindCase(c){
   });
   app.querySelectorAll("[data-mic]").forEach(b=>b.onclick=()=>toggleMic(b.dataset.mic,b));
   if($("parseEst")) $("parseEst").onclick=()=>parseEstimate(c);
-  $("report").onclick=()=>showReport(c);
+  $("report").onclick=()=>showDoc(c,"report");
+  $("quote").onclick=()=>showDoc(c,"quote");
   $("backup").onclick=()=>saveFile(`תיק-${fmtPlate(c.plate)||c.id}.json`,JSON.stringify(c,null,2));
   if(window.Native){const b=document.createElement("button");b.textContent="שתף גיבוי";b.onclick=()=>Native.shareFile(`תיק-${fmtPlate(c.plate)||c.id}.json`,"application/json",JSON.stringify(c,null,2));$("backup").after(b)}
   $("del").onclick=()=>confirmBox(`למחוק את התיק ${fmtPlate(c.plate)||""}? אי אפשר לבטל.`,"מחק",async()=>{
@@ -431,7 +434,8 @@ async function lookupVehicle(c,manual){
 function profileSummary(){
   const a=[profile.appraiserName,profile.appraiserLicense&&("רישיון "+profile.appraiserLicense)].filter(Boolean).join(", ");
   const o=[profile.officeName,profile.officeLicense&&("רישיון "+profile.officeLicense)].filter(Boolean).join(", ");
-  return [a,o].filter(Boolean).join(" · ");
+  const k=[profile.officePhone,profile.officeEmail].filter(Boolean).join(", ");
+  return [a,o,k].filter(Boolean).join(" · ");
 }
 function profileDialog(){
   const ov=document.createElement("div");ov.className="ov";ov.setAttribute("role","dialog");ov.setAttribute("aria-label","פרטי השמאי והמשרד");
@@ -564,6 +568,45 @@ ${txt.slice(0,6000)}`,{modelTier:"default"});
   }catch(e){aiError(e);b.disabled=false;msg.textContent=""}
 }
 
+/* ---------- documents (report, repair quote) ---------- */
+const DOC_CSS=`body{font:14px/1.5 Arial,"Heebo",sans-serif;color:#111;max-width:800px;margin:24px auto;padding:0 16px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;border-bottom:2px solid #111;padding-bottom:3px;margin:22px 0 8px}
+table{border-collapse:collapse;width:100%}th,td{text-align:right;padding:4px 6px;border-bottom:1px solid #ddd;vertical-align:top}
+th{width:34%;font-weight:600;color:#444}.est th{width:auto}.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.ph{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.ph figure{margin:0;break-inside:avoid}.ph img{width:100%;border:1px solid #ccc}
+figcaption{font-size:12px;color:#333;white-space:pre-wrap}.sig{margin-top:40px;display:flex;justify-content:space-between}
+.plate{direction:ltr;display:inline-block;background:#f7d117;border:2px solid #111;border-radius:4px;padding:2px 10px;font-weight:700}
+@media print{body{margin:0}h2{break-after:avoid}}`;
+function officeLine(){
+  const p=profile;
+  const a=[p.officeName&&`<b>${esc(p.officeName)}</b>`,p.officeLicense&&`רישיון משרד מס׳ ${esc(p.officeLicense)}`].filter(Boolean).join(" · ");
+  const b=[p.officePhone&&`טל׳ <span dir="ltr">${esc(p.officePhone)}</span>`,p.officeEmail&&`<span dir="ltr">${esc(p.officeEmail)}</span>`].filter(Boolean).join(" · ");
+  return (a||b)?`<div class="keep" style="border-bottom:1px solid #999;padding-bottom:6px;margin-bottom:12px;font-size:13px">${a?`<div style="font-size:15px">${a}</div>`:""}${b?`<div>${b}</div>`:""}</div>`:"";
+}
+const sigLine=()=>`<div class="sig"><span>שם השמאי: ${profile.appraiserName?esc(profile.appraiserName):"____________________"}${profile.appraiserLicense?` · רישיון מס׳ ${esc(profile.appraiserLicense)}`:""}</span><span>חתימה: ____________________</span></div>`;
+const vehicleRows=(c,kv)=>`${kv("מספר רישוי",fmtPlate(c.plate))}${kv("יצרן ודגם",[c.make,c.model].filter(Boolean).join(" "))}${kv("שנת ייצור",c.year)}${kv("קילומטראז׳",c.km)}${kv("צבע",c.color)}${kv("מספר שלדה",c.vin)}`;
+const costTable=(c,t)=>`<table class="est"><tr><th>תיאור</th><th>סוג</th><th class="num">סכום</th></tr>
+${c.costs.map(r=>`<tr><td>${esc(r.desc)}</td><td>${esc(r.kind)}</td><td class="num">${fmt.format(Number(r.amount)||0)}</td></tr>`).join("")}
+<tr><td colspan="2">סה״כ לפני מע״מ</td><td class="num">${fmt.format(t.sub)}</td></tr>
+<tr><td colspan="2">מע״מ ${VAT*100}%</td><td class="num">${fmt.format(t.vat)}</td></tr>
+<tr><td colspan="2"><b>סה״כ כולל מע״מ</b></td><td class="num"><b>${fmt.format(t.total)}</b></td></tr></table>`;
+function buildQuote(c){
+  const t=totals(c), kv=(k,v)=>v?`<tr><th>${k}</th><td>${esc(v)}</td></tr>`:"";
+  const rows=(c.costs||[]).filter(r=>r.desc||Number(r.amount));
+  return `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>הצעת תיקון ${esc(fmtPlate(c.plate))}</title><style>${DOC_CSS}</style></head><body>
+${officeLine()}
+<h1>הצעת תיקון</h1>
+<div>רכב <span class="plate">${esc(fmtPlate(c.plate)||"—")}</span> · ${new Date().toLocaleDateString("he-IL")}</div>
+<h2>פרטי הרכב</h2><table>${vehicleRows(c,kv)}</table>
+<h2>פרטי התיק</h2><table>${kv("בעלים",c.owner)}${kv("טלפון",c.phone)}${kv("חברת ביטוח",c.insurer)}${kv("מספר תביעה",c.claimNo)}${kv("תאריך האירוע",fmtDate(c.eventDate))}${kv("תאריך הבדיקה",fmtDate(c.inspDate))}${kv("מקום הבדיקה",c.inspPlace)}</table>
+<h2>פירוט התיקון והעלויות</h2>
+${rows.length?costTable({costs:rows},t):`<p>לא הוזנו שורות אומדן.</p>`}
+${c.notes?`<h2>הערות</h2><p style="white-space:pre-wrap">${esc(c.notes)}</p>`:""}
+${sigLine()}
+<p style="font-size:11px;color:#666;margin-top:24px">הסכומים בשקלים חדשים. מע״מ מחושב לפי ${VAT*100}%.</p>
+</body></html>`;
+}
+
 /* ---------- report ---------- */
 async function photoDataURL(p){try{return await toDataURL(await photoBlob(p))}catch{return null}}
 async function buildReport(c){
@@ -572,48 +615,61 @@ async function buildReport(c){
   const kv=(k,v)=>v?`<tr><th>${k}</th><td>${esc(v)}</td></tr>`:"";
   const byArea=AREAS.map(a=>imgs.filter(x=>x.p.area===a&&x.u)).filter(g=>g.length);
   return `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>דוח שטח ${esc(fmtPlate(c.plate))}</title>
-<style>body{font:14px/1.5 Arial,"Heebo",sans-serif;color:#111;max-width:800px;margin:24px auto;padding:0 16px}
-h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;border-bottom:2px solid #111;padding-bottom:3px;margin:22px 0 8px}
-table{border-collapse:collapse;width:100%}th,td{text-align:right;padding:4px 6px;border-bottom:1px solid #ddd;vertical-align:top}
-th{width:34%;font-weight:600;color:#444}.est th{width:auto}.num{font-variant-numeric:tabular-nums;white-space:nowrap}
-.ph{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.ph figure{margin:0;break-inside:avoid}.ph img{width:100%;border:1px solid #ccc}
-figcaption{font-size:12px;color:#333;white-space:pre-wrap}.sig{margin-top:40px;display:flex;justify-content:space-between}
-.plate{direction:ltr;display:inline-block;background:#f7d117;border:2px solid #111;border-radius:4px;padding:2px 10px;font-weight:700}
-@media print{body{margin:0}h2{break-after:avoid}}</style></head><body>
-${profile.officeName?`<div style="font-weight:700;font-size:15px">${esc(profile.officeName)}${profile.officeLicense?` <span style="font-weight:400">· רישיון משרד מס׳ ${esc(profile.officeLicense)}</span>`:""}</div>`:""}
+<style>${DOC_CSS}</style></head><body>
+${officeLine()}
 <h1>דוח בדיקת רכב בשטח</h1>
 <div>רכב <span class="plate">${esc(fmtPlate(c.plate)||"—")}</span> · הופק ${new Date().toLocaleDateString("he-IL")}</div>
-<h2>פרטי הרכב</h2><table>${kv("מספר רישוי",fmtPlate(c.plate))}${kv("יצרן ודגם",[c.make,c.model].filter(Boolean).join(" "))}${kv("שנת ייצור",c.year)}${kv("קילומטראז׳",c.km)}${kv("צבע",c.color)}${kv("מספר שלדה",c.vin)}${c.reg?kv("סוג דלק",c.reg.fuel)+kv("רמת גימור",c.reg.trim)+kv("בעלות",c.reg.ownership)+kv("טסט אחרון",fmtDate(c.reg.lastTest))+kv("רישיון רכב בתוקף עד",fmtDate(c.reg.validUntil))+kv("עלייה לכביש",c.reg.onRoad):""}</table>
+<h2>פרטי הרכב</h2><table>${vehicleRows(c,kv)}${c.reg?kv("סוג דלק",c.reg.fuel)+kv("רמת גימור",c.reg.trim)+kv("בעלות",c.reg.ownership)+kv("טסט אחרון",fmtDate(c.reg.lastTest))+kv("רישיון רכב בתוקף עד",fmtDate(c.reg.validUntil))+kv("עלייה לכביש",c.reg.onRoad):""}</table>
 ${c.reg?`<p style="font-size:11px;color:#666;margin:4px 0 0">נתוני רישום ממאגר משרד התחבורה (data.gov.il), נמשכו ב-${new Date(c.reg.fetchedAt).toLocaleDateString("he-IL")}.</p>`:""}
-${(profile.appraiserName||profile.appraiserLicense||profile.officeName||profile.officeLicense)?`<h2>פרטי השמאי</h2><table>${kv("שם השמאי",profile.appraiserName)}${kv("מספר רישיון שמאי",profile.appraiserLicense)}${kv("משרד שמאות",profile.officeName)}${kv("מספר רישיון / אישור משרד",profile.officeLicense)}</table>`:""}
-<h2>פרטי התיק</h2><table>${kv("בעלים",c.owner)}${kv("טלפון",c.phone)}${kv("חברת ביטוח",c.insurer)}${kv("מספר תביעה",c.claimNo)}${kv("תאריך האירוע",c.eventDate)}${kv("תאריך הבדיקה",c.inspDate)}${kv("מקום הבדיקה",c.inspPlace)}${c.gps?kv("קואורדינטות",c.gps.lat.toFixed(5)+", "+c.gps.lng.toFixed(5)+(c.gps.acc?` (±${Math.round(c.gps.acc)} מ׳)`:"")):""}</table>
+${(profile.appraiserName||profile.appraiserLicense||profile.officeName||profile.officeLicense||profile.officePhone||profile.officeEmail)?`<h2>פרטי השמאי</h2><table>${kv("שם השמאי",profile.appraiserName)}${kv("מספר רישיון שמאי",profile.appraiserLicense)}${kv("משרד שמאות",profile.officeName)}${kv("מספר רישיון / אישור משרד",profile.officeLicense)}${kv("טלפון המשרד",profile.officePhone)}${kv("מייל המשרד",profile.officeEmail)}</table>`:""}
+<h2>פרטי התיק</h2><table>${kv("בעלים",c.owner)}${kv("טלפון",c.phone)}${kv("חברת ביטוח",c.insurer)}${kv("מספר תביעה",c.claimNo)}${kv("תאריך האירוע",fmtDate(c.eventDate))}${kv("תאריך הבדיקה",fmtDate(c.inspDate))}${kv("מקום הבדיקה",c.inspPlace)}${c.gps?kv("קואורדינטות",c.gps.lat.toFixed(5)+", "+c.gps.lng.toFixed(5)+(c.gps.acc?` (±${Math.round(c.gps.acc)} מ׳)`:"")):""}</table>
 ${c.notes?`<h2>הערות השמאי</h2><p style="white-space:pre-wrap">${esc(c.notes)}</p>`:""}
-${(c.costs||[]).length?`<h2>אומדן נזק</h2><table class="est"><tr><th>תיאור</th><th>סוג</th><th class="num">סכום</th></tr>
-${c.costs.map(r=>`<tr><td>${esc(r.desc)}</td><td>${esc(r.kind)}</td><td class="num">${fmt.format(Number(r.amount)||0)}</td></tr>`).join("")}
-<tr><td colspan="2">סה״כ לפני מע״מ</td><td class="num">${fmt.format(t.sub)}</td></tr>
-<tr><td colspan="2">מע״מ ${VAT*100}%</td><td class="num">${fmt.format(t.vat)}</td></tr>
-<tr><td colspan="2"><b>סה״כ כולל מע״מ</b></td><td class="num"><b>${fmt.format(t.total)}</b></td></tr></table>`:""}
+${(c.costs||[]).length?`<h2>אומדן נזק</h2>${costTable(c,t)}`:""}
 ${byArea.length?`<h2>תמונות (${imgs.filter(x=>x.u).length})</h2>${byArea.map(g=>`<h3 style="font-size:14px;margin:12px 0 6px">${esc(g[0].p.area)}</h3><div class="ph">${g.map(x=>`<figure><img src="${x.u}" alt="${esc(x.p.area)}"><figcaption>${new Date(x.p.ts).toLocaleString("he-IL")}${x.p.gps?" · "+x.p.gps.lat.toFixed(5)+", "+x.p.gps.lng.toFixed(5):""}${x.p.caption?"\n"+esc(x.p.caption):""}</figcaption></figure>`).join("")}</div>`).join("")}`:""}
-<div class="sig"><span>שם השמאי: ${profile.appraiserName?esc(profile.appraiserName):"____________________"}${profile.appraiserLicense?` · רישיון מס׳ ${esc(profile.appraiserLicense)}`:""}</span><span>חתימה: ____________________</span></div>
+${sigLine()}
 <p style="font-size:11px;color:#666;margin-top:24px">דוח שטח לתיעוד ראשוני. אינו מהווה חוות דעת שמאית חתומה.</p>
 </body></html>`;
 }
-async function showReport(c){
-  const btn=$("report");btn.disabled=true;btn.textContent="מכין דוח…";
-  let html; try{html=await buildReport(c)}finally{btn.disabled=false;btn.textContent="הפק דוח שטח"}
-  const missing=c.photos.filter(p=>!p.src).length;
-  const ov=document.createElement("div");ov.className="ov";ov.setAttribute("role","dialog");ov.setAttribute("aria-label","דוח שטח");
+const toPdfHtml=h=>h.replace("</head>",'<style>body{margin:0!important;max-width:none!important;padding:0 2px!important}</style></head>');
+function mailText(c,title){
+  const plate=fmtPlate(c.plate)||"";
+  const subject=`${title}${plate?" – רכב "+plate:""}${c.claimNo?" – תביעה "+c.claimNo:""}`;
+  const sig=[[profile.appraiserName,profile.appraiserLicense&&("רישיון שמאי "+profile.appraiserLicense)].filter(Boolean).join(", "),
+    profile.officeName,profile.officePhone,profile.officeEmail].filter(Boolean).join("\n");
+  const body=`שלום,\n\nמצורפת ${title}${plate?" לרכב "+plate:""}${c.claimNo?" (תביעה "+c.claimNo+")":""}.\n\nבברכה,${sig?"\n"+sig:""}`;
+  return {subject,body};
+}
+async function showDoc(c,kind){
+  const isQ=kind==="quote", title=isQ?"הצעת תיקון":"דוח שטח", btn=$(isQ?"quote":"report"), label=btn.textContent;
+  if(isQ&&!(c.costs||[]).some(r=>r.desc||Number(r.amount)))toast("אין עדיין שורות אומדן. ההצעה תצא בלי פירוט עלויות.");
+  btn.disabled=true;btn.textContent="מכין…";
+  let html; try{html=isQ?buildQuote(c):await buildReport(c)}finally{btn.disabled=false;btn.textContent=label}
+  const missing=isQ?0:c.photos.filter(p=>!p.src).length;
+  const base=`${isQ?"הצעת-תיקון":"דוח-שטח"}-${fmtPlate(c.plate)||c.id}`;
+  const native=!!(window.Native&&Native.makePdf);
+  const ov=document.createElement("div");ov.className="ov";ov.setAttribute("role","dialog");ov.setAttribute("aria-label",title);
   const body=html.replace(/^[\s\S]*?<body>/,"").replace(/<\/body>[\s\S]*$/,"");
   const style=(html.match(/<style>([\s\S]*?)<\/style>/)||[])[1]||"";
-  ov.innerHTML=`<div class="box"><div class="row"><h2 style="flex:1">דוח שטח</h2>
-    ${cap.dl?`<button class="primary" id="rSave">שמור כקובץ HTML</button>`:""}${window.Native?`<button id="rShare">שתף</button>`:""}<button id="rClose">סגור</button></div>
-    <p class="note">${cap.dl?(window.Native?"הקובץ נשמר בתיקיית ההורדות. אפשר לפתוח אותו בדפדפן ולהדפיס ל-PDF, או לשתף ישירות בוואטסאפ או במייל.":"פתח את הקובץ השמור בדפדפן ובחר הדפסה ← שמירה כ-PDF."):"שמירת קבצים לא זמינה כאן. פתח את הדף ב-claude.ai כדי לשמור את הדוח."}${missing?` ${missing} תמונות לא זמינות במסך הזה ולא נכללו.`:""}</p>
+  ov.innerHTML=`<div class="box"><div class="row"><h2 style="flex:1">${title}</h2>
+    ${native?`<button class="primary" data-pdf="email">שלח PDF במייל</button><button data-pdf="save">שמור PDF</button><button data-pdf="share">שתף PDF</button>`
+      :(cap.dl?`<button class="primary" id="rSave">שמור כקובץ HTML</button>`:"")}<button id="rClose">סגור</button></div>
+    <p class="note">${native?`"שלח PDF במייל" פותח את אפליקציית המייל של הטלפון עם הקובץ מצורף${c.email?" ועם הנמען "+esc(c.email):""}. "שמור PDF" שומר בתיקיית ההורדות, בתת-תיקייה FieldCase.`
+      :(cap.dl?"פתח את הקובץ השמור בדפדפן ובחר הדפסה ← שמירה כ-PDF.":"שמירת קבצים לא זמינה כאן. פתח את הדף ב-claude.ai כדי לשמור את המסמך.")}${missing?` ${missing} תמונות לא זמינות במסך הזה ולא נכללו.`:""}</p>
     <div class="rep"><style>${style.replace(/body\{/g,".rep-in{")}</style><div class="rep-in" dir="rtl">${body}</div></div></div>`;
   document.body.appendChild(ov);
   const close=()=>ov.remove();
   $("rClose").onclick=close; ov.onclick=e=>{if(e.target===ov)close()};
-  if($("rSave")) $("rSave").onclick=()=>saveFile(`דוח-שטח-${fmtPlate(c.plate)||c.id}.html`,html);
-  if($("rShare")) $("rShare").onclick=()=>Native.shareFile(`דוח-שטח-${fmtPlate(c.plate)||c.id}.html`,"text/html",html);
+  if($("rSave")) $("rSave").onclick=()=>saveFile(base+".html",html);
+  ov.querySelectorAll("[data-pdf]").forEach(b=>b.onclick=async()=>{
+    const action=b.dataset.pdf, lbl=b.textContent, all=ov.querySelectorAll("[data-pdf]");
+    all.forEach(x=>x.disabled=true); b.textContent="מכין PDF…";
+    const {subject,body}=mailText(c,title);
+    try{
+      const r=await NB.call("makePdf",toPdfHtml(html),base+".pdf",action,c.email||"",subject,body);
+      if(action==="save")toast("ה-PDF נשמר: "+(r.where||"הורדות/FieldCase"));
+    }catch(e){toast(e&&e.code==="busy"?"PDF אחר עדיין בהכנה. נסה שוב בעוד רגע.":"הכנת ה-PDF נכשלה. נסה שוב.")}
+    finally{all.forEach(x=>x.disabled=false);b.textContent=lbl}
+  });
 }
 async function saveFile(name,data){
   if(!cap.dl){toast("שמירת קבצים לא זמינה בתצוגה הזו.");return}
@@ -657,6 +713,26 @@ function nativeBoot(){
   setSync(mode==="local"?"שמור בטלפון":"לא נשמר",mode==="local"?"ok":"local");
   {const h=location.hash.slice(1);if(h.startsWith("c-")&&cases[h.slice(2)])current=h.slice(2)}
   render();
+  if(location.hash==="#selftest-pdf")selfTestPdf();
+}
+async function selfTestPdf(){
+  try{
+    profile={appraiserName:"ישראל ישראלי",appraiserLicense:"1234",officeName:"משרד שמאות לדוגמה",officeLicense:"5678",officePhone:"03-1234567",officeEmail:"office@example.com"};
+    const s=Object.assign(newCase(),{plate:"82-279-39",make:"מיצובישי",model:"ATTRAGE",year:"2016",km:"123456",color:"כסוף",vin:"MMCSTA13AGH003741",
+      owner:"בעל רכב לדוגמה",phone:"050-0000000",email:"test@example.com",insurer:"חברת ביטוח",claimNo:"CL-2026-001",eventDate:"2026-11-20",inspPlace:"מוסך לדוגמה, תל אביב",
+      notes:"פגיעה בחזית הרכב בצד ימין. פגוש קדמי שבור, פנס ימני סדוק.\nאין פגיעה נראית בשלדה.",
+      reg:{plate:"8227939",fetchedAt:Date.now(),fuel:"בנזין",trim:"INSTYLE",ownership:"פרטי",lastTest:"2026-11-10",validUntil:"2027-11-05",onRoad:"2016-11"}});
+    s.costs=Array.from({length:45},(_,i)=>({desc:`פריט מספר ${i+1} — החלפה וצביעה`,kind:KINDS[i%4],amount:String(150+i*37)}));
+    for(const [k,col] of [["חזית","#c33"],["צד ימין","#36c"],["אחור","#3a3"]]){
+      const cv=document.createElement("canvas");cv.width=800;cv.height=600;const g=cv.getContext("2d");
+      g.fillStyle=col;g.fillRect(0,0,800,600);g.fillStyle="#fff";g.font="bold 80px sans-serif";g.fillText(k,250,320);
+      const blob=await new Promise(r=>cv.toBlob(r,"image/jpeg",.8));const p={id:uid(),area:k,caption:"תמונת בדיקה "+k,ts:Date.now(),src:URL.createObjectURL(blob)};
+      blobs.set(p.id,blob);s.photos.push(p);
+    }
+    const q=await NB.call("makePdf",toPdfHtml(buildQuote(s)),"selftest-quote.pdf","none","","","");
+    const r=await NB.call("makePdf",toPdfHtml(await buildReport(s)),"selftest-report.pdf","none","","","");
+    console.log("SELFTEST_PDF_OK quote="+JSON.stringify(q)+" report="+JSON.stringify(r));
+  }catch(e){console.log("SELFTEST_PDF_FAIL "+JSON.stringify(e)+" "+(e&&e.message))}
 }
 window.__back=()=>{const ovs=document.querySelectorAll(".ov");if(ovs.length){ovs[ovs.length-1].remove();return true}
   if(current){go(null);return true}return false};

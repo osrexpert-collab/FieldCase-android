@@ -61,10 +61,37 @@ jobs:
             echo "===== app / webview log ====="
             adb logcat -d | grep -E "AndroidRuntime|FATAL|chromium|Console|il\.shamai\.field|WebView" | tail -150 || true
             adb exec-out screencap -p > screen.png || true
+            adb shell am force-stop il.shamai.field
+            adb logcat -c
+            adb shell am start -W -n il.shamai.field/.MainActivity --es selftest pdf
+            sleep 45
+            echo "===== PDF self-test ====="
+            adb logcat -d | grep -E "SELFTEST|FieldCase|Uncaught|AndroidRuntime" | tail -40 || true
+            adb exec-out run-as il.shamai.field cat cache/share/selftest-quote.pdf > quote.pdf || true
+            adb exec-out run-as il.shamai.field cat cache/share/selftest-report.pdf > report.pdf || true
+            ls -la quote.pdf report.pdf || true
+
+      - name: Inspect PDFs
+        if: always()
+        run: |
+          sudo apt-get install -y -qq poppler-utils >/dev/null 2>&1 || true
+          for f in quote.pdf report.pdf; do
+            echo "===== $f"; [ -s "$f" ] || { echo "MISSING"; continue; }
+            pdfinfo "$f" | grep -E "Pages|Page size"
+            pdftotext -layout "$f" - | head -50
+          done
+          [ -s quote.pdf ] && pdftoppm -r 45 -png quote.pdf q || true
+          [ -s report.pdf ] && pdftoppm -r 45 -png report.pdf r || true
+          for f in $(ls q-*.png 2>/dev/null | head -2) $(ls r-*.png 2>/dev/null | head -4); do
+            echo "IMG_BEGIN $f"; base64 -w 3000 "$f"; echo "IMG_END $f"
+          done
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: smoke-screenshot
-          path: screen.png
+          name: smoke-output
+          path: |
+            screen.png
+            quote.pdf
+            report.pdf
           if-no-files-found: ignore
