@@ -69,20 +69,22 @@ jobs:
             adb logcat -d | grep -E "SELFTEST|FieldCase|Uncaught|AndroidRuntime" | tail -40 || true
             adb exec-out run-as il.shamai.field cat cache/share/selftest-quote.pdf > quote.pdf || true
             adb exec-out run-as il.shamai.field cat cache/share/selftest-report.pdf > report.pdf || true
-            ls -la quote.pdf report.pdf || true
+            adb exec-out run-as il.shamai.field cat cache/share/selftest-shuma.pdf > shuma.pdf || true
+            ls -la quote.pdf report.pdf shuma.pdf || true
 
       - name: Inspect PDFs
         if: always()
         run: |
           sudo apt-get install -y -qq poppler-utils >/dev/null 2>&1 || true
-          for f in quote.pdf report.pdf; do
+          for f in quote.pdf report.pdf shuma.pdf; do
             echo "===== $f"; [ -s "$f" ] || { echo "MISSING"; continue; }
             pdfinfo "$f" | grep -E "Pages|Page size"
             pdftotext -layout "$f" - | head -50
           done
           [ -s quote.pdf ] && pdftoppm -r 45 -png quote.pdf q || true
           [ -s report.pdf ] && pdftoppm -r 45 -png report.pdf r || true
-          for f in $(ls q-*.png 2>/dev/null | head -2) $(ls r-*.png 2>/dev/null | head -4); do
+          [ -s shuma.pdf ] && pdftoppm -r 110 -png shuma.pdf s || true
+          for f in $(ls s-*.png 2>/dev/null | head -1) $(ls q-*.png 2>/dev/null | head -1); do
             echo "IMG_BEGIN $f"; base64 -w 3000 "$f"; echo "IMG_END $f"
           done
 
@@ -94,4 +96,5 @@ jobs:
             screen.png
             quote.pdf
             report.pdf
+            shuma.pdf
           if-no-files-found: ignore

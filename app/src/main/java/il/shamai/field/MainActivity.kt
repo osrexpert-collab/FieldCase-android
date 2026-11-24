@@ -472,9 +472,9 @@ class MainActivity : ComponentActivity() {
     """.trimIndent()
 
     @SuppressLint("SetJavaScriptEnabled")
-    private fun htmlToPdf(html: String, out: File, done: (Int) -> Unit, fail: (String) -> Unit) {
+    private fun htmlToPdf(html: String, out: File, fullPage: Boolean, done: (Int) -> Unit, fail: (String) -> Unit) {
         val density = resources.displayMetrics.density
-        val pageW = 595; val pageH = 842; val margin = 28f            // A4 בנקודות
+        val pageW = 595; val pageH = 842; val margin = if (fullPage) 0f else 28f   // A4 בנקודות; טופס המשרד בלי שוליים
         val printW = pageW - 2 * margin; val printH = pageH - 2 * margin
         val wPx = (720 * density).roundToInt()                         // רוחב 720px של CSS
         val scale = printW / wPx                                        // נקודות לפיקסל
@@ -548,12 +548,12 @@ class MainActivity : ComponentActivity() {
         pw.loadDataWithBaseURL("https://$host/", html, "text/html", "utf-8", null)
     }
 
-    private fun makePdf(cb: String, html: String, name: String, action: String, to: String, subject: String, body: String) {
+    private fun makePdf(cb: String, html: String, name: String, action: String, to: String, subject: String, body: String, mode: String) {
         if (pdfBusy) { reject(cb, "busy"); return }
         pdfBusy = true
         val safe = safeName(name).let { if (it.endsWith(".pdf", true)) it else "$it.pdf" }
         val f = File(File(cacheDir, "share").apply { mkdirs() }, safe)
-        htmlToPdf(html, f, { pages ->
+        htmlToPdf(html, f, mode == "page", { pages ->
             pdfBusy = false
             val res = JSONObject().put("pages", pages).put("bytes", f.length()).put("name", safe)
             Log.i("FieldCase", "PDF $safe pages=$pages bytes=${f.length()}")
@@ -635,8 +635,8 @@ class MainActivity : ComponentActivity() {
             } catch (e: Exception) { reject(cb, "save_failed") }
         }
 
-        @JavascriptInterface fun makePdf(cb: String, html: String, name: String, action: String, to: String, subject: String, body: String) =
-            runOnUiThread { this@MainActivity.makePdf(cb, html, name, action, to, subject, body) }
+        @JavascriptInterface fun makePdf(cb: String, html: String, name: String, action: String, to: String, subject: String, body: String, mode: String) =
+            runOnUiThread { this@MainActivity.makePdf(cb, html, name, action, to, subject, body, mode) }
 
         @JavascriptInterface fun vehicleLookup(cb: String, plate: String) = net.execute {
             this@MainActivity.vehicleLookup(cb, plate)

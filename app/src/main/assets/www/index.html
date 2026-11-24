@@ -322,15 +322,18 @@ function caseView(c){
     <div class="tot" id="tot">${totHtml(t)}</div>
   </section>
 
+  ${shumaCardHtml(c)}
+
   <section class="card">
     <h2>סיום</h2>
     <div class="sticky-actions">
       <button class="primary" id="report">הפק דוח שטח</button>
       <button class="primary" id="quote">הצעת תיקון</button>
+      <button class="primary" id="shuma">שומת נזקים</button>
       <button id="backup">גיבוי התיק (JSON)</button>
       <button class="danger" id="del">מחק תיק</button>
     </div>
-    <p class="note">דוח השטח כולל פרטי רכב ותיק, תמונות לפי אזור, הערות ואומדן עם מע״מ ${VAT*100}%. הצעת התיקון כוללת את פרטי הרכב והתיק ואת פירוט העלויות, בלי תמונות. ${window.Native?"את שניהם אפשר לשמור כ-PDF או לשלוח במייל מהטלפון.":""}</p>
+    <p class="note">דוח השטח כולל פרטי רכב ותיק, תמונות לפי אזור, הערות ואומדן עם מע״מ ${VAT*100}%. הצעת התיקון כוללת את פרטי הרכב והתיק ואת פירוט העלויות, בלי תמונות. שומת הנזקים יוצאת על הטופס של המשרד. ${window.Native?"את כולם אפשר לשמור כ-PDF או לשלוח במייל מהטלפון.":""}</p>
   </section>`;
 }
 const totHtml=t=>`<span>סה״כ לפני מע״מ</span><span>${fmt.format(t.sub)}</span><span>מע״מ ${VAT*100}%</span><span>${fmt.format(t.vat)}</span><span class="g">סה״כ</span><span class="g">${fmt.format(t.total)}</span>`;
@@ -380,6 +383,8 @@ function bindCase(c){
   if($("parseEst")) $("parseEst").onclick=()=>parseEstimate(c);
   $("report").onclick=()=>showDoc(c,"report");
   $("quote").onclick=()=>showDoc(c,"quote");
+  $("shuma").onclick=()=>showDoc(c,"shuma");
+  bindShuma(c);
   $("backup").onclick=()=>saveFile(`תיק-${fmtPlate(c.plate)||c.id}.json`,JSON.stringify(c,null,2));
   if(window.Native){const b=document.createElement("button");b.textContent="שתף גיבוי";b.onclick=()=>Native.shareFile(`תיק-${fmtPlate(c.plate)||c.id}.json`,"application/json",JSON.stringify(c,null,2));$("backup").after(b)}
   $("del").onclick=()=>confirmBox(`למחוק את התיק ${fmtPlate(c.plate)||""}? אי אפשר לבטל.`,"מחק",async()=>{
@@ -568,6 +573,88 @@ ${txt.slice(0,6000)}`,{modelTier:"default"});
   }catch(e){aiError(e);b.disabled=false;msg.textContent=""}
 }
 
+/* ---------- שומת נזקים: the office's own form, filled from the case ---------- */
+const SH_K=720/595.32;                    // form points -> CSS px (page drawn 720px wide)
+const SH_HDR=[[105.7,119.2],[122.6,136.1],[139.6,153.0],[156.5,169.9],[173.4,186.8]];
+const SH_ROWS=[201.1,227.0,253.0,278.9,304.9,330.8,356.8,382.7,408.6,434.6,460.6,486.5,512.4,538.3,563.9];
+const SH_MAX=SH_ROWS.length-1;
+const SH_BOT=[[578.3,602.8],[603.2,628.7],[629.2,654.7],[655.2,680.6],[681.1,706.6]];
+const SH_EXTRA=[["bodywork","עבודות פחחות"],["paint","עבודות צבע"],["electric","עבודות חשמל"],["mechanic","עבודות מכונאות"],["alignment","כיוון מתלים"],
+                ["bumper","שיפוץ מגן"],["reg309","תקנה 309"],["ac","עבודות מזגן"],["sensors","פו\"ה חיישנים"],["glass","עבודות זגגות"]];
+const PTYPES=["מקורי","תואם","משומש"];
+const SH_PCOL={"מקורי":[122.4,157.6],"תואם":[86.3,121.9],"משומש":[43.8,85.8]};
+function shumaOf(c){if(!c.shuma)c.shuma={type:"",rows:[],extra:{}};c.shuma.extra=c.shuma.extra||{};c.shuma.rows=c.shuma.rows||[];return c.shuma}
+let shumaBg=null;
+async function shumaBgUrl(){
+  if(shumaBg)return shumaBg;
+  const b=await (await fetch("shuma-form.png")).blob();
+  shumaBg=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(b)});
+  return shumaBg;
+}
+function shBox(x0,top,x1,bottom,text,{size=10,center=false,lines=1}={}){
+  const t=String(text??"").trim(); if(!t)return "";
+  const w=(x1-x0)*SH_K-6, h=(bottom-top)*SH_K;
+  let fs=size*SH_K; const cap=(w/(fs*0.5))*lines; if(t.length>cap)fs=Math.max(6.5*SH_K,fs*cap/t.length);
+  return `<div class="f" style="left:${(x0*SH_K+3).toFixed(1)}px;top:${(top*SH_K).toFixed(1)}px;width:${w.toFixed(1)}px;height:${h.toFixed(1)}px;font-size:${fs.toFixed(1)}px;justify-content:${center?"center":"flex-start"}"><span style="${lines>1?"white-space:normal;line-height:1.1":"white-space:nowrap"}">${esc(t)}</span></div>`;
+}
+const SHUMA_CSS=`html,body{margin:0;padding:0;background:#fff}body{font-family:Arial,"Liberation Sans",sans-serif;color:#000}
+.sheet{position:relative;width:720px;height:1018px;overflow:hidden;background:#fff}.sheet>img{position:absolute;left:0;top:0;width:720px;height:auto}
+.f{position:absolute;display:flex;align-items:center;overflow:hidden;direction:rtl;color:#111}`;
+function buildShuma(c,bg){
+  const s=shumaOf(c), rows=s.rows.filter(r=>r.work||r.part||r.ptype).slice(0,SH_MAX);
+  const right=[fmtDate(c.inspDate),fmtDate(c.eventDate),[c.make,c.model].filter(Boolean).join(" "),c.year,c.reg&&c.reg.ownership];
+  const left=[fmtPlate(c.plate),c.km,c.vin,c.inspPlace,s.type];
+  let h="";
+  SH_HDR.forEach(([t,b],i)=>{h+=shBox(309.2,t,473.5,b,right[i]);h+=shBox(43.1,t,214.0,b,left[i])});
+  rows.forEach((r,i)=>{const t=SH_ROWS[i],b=SH_ROWS[i+1];
+    h+=shBox(303.6,t,556.3,b,r.work,{size:9,lines:2});
+    h+=shBox(158.0,t,303.1,b,r.part,{size:9,lines:2});
+    const col=SH_PCOL[r.ptype]; if(col)h+=shBox(col[0],t,col[1],b,"X",{size:10,center:true});
+  });
+  SH_BOT.forEach(([t,b],i)=>{
+    h+=shBox(255.8,t,446.9,b,s.extra[SH_EXTRA[i][0]],{lines:2});
+    h+=shBox(43.3,t,187.0,b,s.extra[SH_EXTRA[i+5][0]],{lines:2});
+  });
+  return `<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>שומת נזקים ${esc(fmtPlate(c.plate))}</title><style>${SHUMA_CSS}</style></head><body><div class="sheet"><img src="${bg}" alt="">${h}</div></body></html>`;
+}
+function shumaCardHtml(c){
+  const s=shumaOf(c);
+  return `<section class="card" id="shumaCard">
+    <h2>שומת נזקים (טופס המשרד)</h2>
+    <p class="note" style="margin-top:0">מספר רישוי, תאריכים, תוצר ודגם, שנה, בעלות, מד אוץ, שלדה ומקום הבדיקה נלקחים מהתיק. כאן ממלאים את מה שחסר.</p>
+    <label for="sh_type">סוג דו"ח<input id="sh_type" data-sk="type" value="${esc(s.type)}"></label>
+    <div class="wrapx"><table class="est"><thead><tr><th>מהות התיקון – עבודות</th><th>פירוט חלפים</th><th>סוג חלף</th><th></th></tr></thead>
+    <tbody>${s.rows.map((r,i)=>`<tr>
+      <td><input aria-label="מהות התיקון" data-si="${i}" data-sf="work" value="${esc(r.work)}"></td>
+      <td><input aria-label="פירוט חלפים" data-si="${i}" data-sf="part" value="${esc(r.part)}"></td>
+      <td class="k"><select aria-label="סוג חלף" data-si="${i}" data-sf="ptype"><option value="">—</option>${PTYPES.map(k=>`<option ${r.ptype===k?"selected":""}>${k}</option>`).join("")}</select></td>
+      <td class="x"><button class="ghost danger" data-sdel="${i}" aria-label="מחק שורה">✕</button></td></tr>`).join("")}</tbody></table></div>
+    <div class="row"><button id="shAdd" ${s.rows.length>=SH_MAX?"disabled":""}>+ שורה</button><button id="shFill">מלא מהאומדן</button>
+      <span class="note" id="shMsg">${s.rows.length}/${SH_MAX} שורות בטופס</span></div>
+    <details ${SH_EXTRA.some(([k])=>s.extra[k])?"open":""}><summary>עבודות לפי תחום</summary>
+      <div class="grid2" style="margin-top:8px">${SH_EXTRA.map(([k,l])=>`<label for="sx_${k}">${l}<input id="sx_${k}" data-sx="${k}" value="${esc(s.extra[k])}"></label>`).join("")}</div>
+    </details>
+  </section>`;
+}
+function bindShuma(c){
+  const s=shumaOf(c), card=$("shumaCard"); if(!card)return;
+  card.querySelectorAll("[data-sk]").forEach(el=>el.addEventListener("input",()=>{s[el.dataset.sk]=el.value;persist(c)}));
+  card.querySelectorAll("[data-sx]").forEach(el=>el.addEventListener("input",()=>{s.extra[el.dataset.sx]=el.value;persist(c)}));
+  card.querySelectorAll("[data-si]").forEach(el=>el.addEventListener(el.tagName==="SELECT"?"change":"input",()=>{
+    const r=s.rows[+el.dataset.si]; if(r){r[el.dataset.sf]=el.value;persist(c)}}));
+  card.querySelectorAll("[data-sdel]").forEach(b=>b.onclick=()=>{s.rows.splice(+b.dataset.sdel,1);persist(c);render()});
+  $("shAdd").onclick=()=>{if(s.rows.length>=SH_MAX)return;s.rows.push({work:"",part:"",ptype:""});persist(c);render();
+    const ins=$("shumaCard").querySelectorAll('[data-sf="work"]');ins[ins.length-1]?.focus()};
+  $("shFill").onclick=()=>{
+    const src=(c.costs||[]).filter(r=>r.desc&&r.desc.trim());
+    if(!src.length){toast("אין שורות באומדן להעתקה.");return}
+    let added=0;
+    for(const r of src){if(s.rows.length>=SH_MAX)break;
+      s.rows.push(r.kind==="חלפים"?{work:"",part:r.desc.trim(),ptype:""}:{work:r.desc.trim(),part:"",ptype:""});added++}
+    persist(c);render();toast(added<src.length?`הועתקו ${added} שורות. בטופס יש מקום ל-${SH_MAX} שורות בלבד.`:`הועתקו ${added} שורות מהאומדן.`);
+  };
+}
+
 /* ---------- documents (report, repair quote) ---------- */
 const DOC_CSS=`body{font:14px/1.5 Arial,"Heebo",sans-serif;color:#111;max-width:800px;margin:24px auto;padding:0 16px}
 h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;border-bottom:2px solid #111;padding-bottom:3px;margin:22px 0 8px}
@@ -640,12 +727,15 @@ function mailText(c,title){
   return {subject,body};
 }
 async function showDoc(c,kind){
-  const isQ=kind==="quote", title=isQ?"הצעת תיקון":"דוח שטח", btn=$(isQ?"quote":"report"), label=btn.textContent;
+  const isQ=kind==="quote", isS=kind==="shuma", title=isS?"שומת נזקים":isQ?"הצעת תיקון":"דוח שטח", btn=$(kind), label=btn.textContent;
+  if(isS&&shumaOf(c).rows.filter(r=>r.work||r.part||r.ptype).length>SH_MAX)toast(`רק ${SH_MAX} השורות הראשונות נכנסות לטופס.`);
   if(isQ&&!(c.costs||[]).some(r=>r.desc||Number(r.amount)))toast("אין עדיין שורות אומדן. ההצעה תצא בלי פירוט עלויות.");
   btn.disabled=true;btn.textContent="מכין…";
-  let html; try{html=isQ?buildQuote(c):await buildReport(c)}finally{btn.disabled=false;btn.textContent=label}
-  const missing=isQ?0:c.photos.filter(p=>!p.src).length;
-  const base=`${isQ?"הצעת-תיקון":"דוח-שטח"}-${fmtPlate(c.plate)||c.id}`;
+  let html; try{html=isS?buildShuma(c,await shumaBgUrl()):isQ?buildQuote(c):await buildReport(c)}
+  catch(e){toast("הכנת המסמך נכשלה.");return}
+  finally{btn.disabled=false;btn.textContent=label}
+  const missing=(isQ||isS)?0:c.photos.filter(p=>!p.src).length;
+  const base=`${isS?"שומת-נזקים":isQ?"הצעת-תיקון":"דוח-שטח"}-${fmtPlate(c.plate)||c.id}`;
   const native=!!(window.Native&&Native.makePdf);
   const ov=document.createElement("div");ov.className="ov";ov.setAttribute("role","dialog");ov.setAttribute("aria-label",title);
   const body=html.replace(/^[\s\S]*?<body>/,"").replace(/<\/body>[\s\S]*$/,"");
@@ -657,6 +747,7 @@ async function showDoc(c,kind){
       :(cap.dl?"פתח את הקובץ השמור בדפדפן ובחר הדפסה ← שמירה כ-PDF.":"שמירת קבצים לא זמינה כאן. פתח את הדף ב-claude.ai כדי לשמור את המסמך.")}${missing?` ${missing} תמונות לא זמינות במסך הזה ולא נכללו.`:""}</p>
     <div class="rep"><style>${style.replace(/body\{/g,".rep-in{")}</style><div class="rep-in" dir="rtl">${body}</div></div></div>`;
   document.body.appendChild(ov);
+  if(isS){const sh=ov.querySelector(".sheet"),box=ov.querySelector(".rep");if(sh&&box){const z=Math.min(1,(box.clientWidth-4)/720);sh.style.zoom=z}}
   const close=()=>ov.remove();
   $("rClose").onclick=close; ov.onclick=e=>{if(e.target===ov)close()};
   if($("rSave")) $("rSave").onclick=()=>saveFile(base+".html",html);
@@ -665,7 +756,7 @@ async function showDoc(c,kind){
     all.forEach(x=>x.disabled=true); b.textContent="מכין PDF…";
     const {subject,body}=mailText(c,title);
     try{
-      const r=await NB.call("makePdf",toPdfHtml(html),base+".pdf",action,c.email||"",subject,body);
+      const r=await NB.call("makePdf",toPdfHtml(html),base+".pdf",action,c.email||"",subject,body,isS?"page":"a4");
       if(action==="save")toast("ה-PDF נשמר: "+(r.where||"הורדות/FieldCase"));
     }catch(e){toast(e&&e.code==="busy"?"PDF אחר עדיין בהכנה. נסה שוב בעוד רגע.":"הכנת ה-PDF נכשלה. נסה שוב.")}
     finally{all.forEach(x=>x.disabled=false);b.textContent=lbl}
@@ -729,9 +820,14 @@ async function selfTestPdf(){
       const blob=await new Promise(r=>cv.toBlob(r,"image/jpeg",.8));const p={id:uid(),area:k,caption:"תמונת בדיקה "+k,ts:Date.now(),src:URL.createObjectURL(blob)};
       blobs.set(p.id,blob);s.photos.push(p);
     }
-    const q=await NB.call("makePdf",toPdfHtml(buildQuote(s)),"selftest-quote.pdf","none","","","");
-    const r=await NB.call("makePdf",toPdfHtml(await buildReport(s)),"selftest-report.pdf","none","","","");
-    console.log("SELFTEST_PDF_OK quote="+JSON.stringify(q)+" report="+JSON.stringify(r));
+    s.shuma={type:"שומה ראשונית",rows:[{work:"החלפת פגוש קדמי וצביעה",part:"פגוש קדמי",ptype:"מקורי"},{work:"תיקון כנף ימנית",part:"פנס ראשי ימני",ptype:"תואם"},
+      {work:"יישור שלדה קדמית ובדיקת גיאומטריה מלאה במכשיר ממוחשב לאחר התיקון",part:"תושבת פגוש",ptype:"משומש"}],
+      extra:{bodywork:"8 שעות",paint:"6 שעות",electric:"",mechanic:"2 שעות",alignment:"כן",bumper:"",reg309:"לא",ac:"",sensors:"כיול חיישן קדמי",glass:""}};
+    s.inspDate="2026-11-24";
+    const q=await NB.call("makePdf",toPdfHtml(buildQuote(s)),"selftest-quote.pdf","none","","","","a4");
+    const r=await NB.call("makePdf",toPdfHtml(await buildReport(s)),"selftest-report.pdf","none","","","","a4");
+    const sh=await NB.call("makePdf",toPdfHtml(buildShuma(s,await shumaBgUrl())),"selftest-shuma.pdf","none","","","","page");
+    console.log("SELFTEST_PDF_OK quote="+JSON.stringify(q)+" report="+JSON.stringify(r)+" shuma="+JSON.stringify(sh));
   }catch(e){console.log("SELFTEST_PDF_FAIL "+JSON.stringify(e)+" "+(e&&e.message))}
 }
 window.__back=()=>{const ovs=document.querySelectorAll(".ov");if(ovs.length){ovs[ovs.length-1].remove();return true}
