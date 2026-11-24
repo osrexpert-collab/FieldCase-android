@@ -1,6 +1,8 @@
 import pikepdf
 from pikepdf import Name, Dictionary, Array, String
-SRC="/home/claude/formsrc/src.pdf"; OUT="/home/claude/outputs/שומת-נזקים-למילוי.pdf"
+import sys
+# usage: python3 make_fillable_form.py <empty-form.pdf> <out.pdf>
+SRC=sys.argv[1]; OUT=sys.argv[2]
 pdf=pikepdf.open(SRC)
 page=pdf.pages[0]; H=float(page.mediabox[3])
 helv=pdf.make_indirect(Dictionary(Type=Name.Font,Subtype=Name.Type1,BaseFont=Name.Helvetica,Encoding=Name.WinAnsiEncoding))
