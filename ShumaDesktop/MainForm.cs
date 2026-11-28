@@ -657,7 +657,7 @@ public class MainForm : Form
             adj.Height = adj.ColumnHeadersHeight + n * adj.RowTemplate.Height + 4;
             addRow.Enabled = n < MaxAdj;
             delRow.Text = n > 1 ? "− מחק שורה" : "− נקה שורה";
-            rowsInfo.Text = $"{n} מתוך {MaxAdj} שורות. למחיקה: לחץ על השורה ואז על \"מחק שורה\".";
+            rowsInfo.Text = $"{n} מתוך {MaxAdj} שורות. למחיקה: בחר שורה ולחץ Delete, או לחיצה ימנית ← מחק שורה.";
         }
         addRow.Click += (_, _) =>
         {
@@ -667,10 +667,9 @@ public class MainForm : Form
             FitAdj(); Changed();
             adj.CurrentCell = adj.Rows[adj.Rows.Count - 1].Cells[0];
         };
-        delRow.Click += (_, _) =>
+        void DeleteAdjRow(int i)
         {
             adj.EndEdit();
-            int i = adj.CurrentRow?.Index ?? data.ValueAdjustments.Count - 1;
             if (i < 0 || i >= data.ValueAdjustments.Count) i = data.ValueAdjustments.Count - 1;
             var row = data.ValueAdjustments[i];
             bool has = !string.IsNullOrWhiteSpace(row.Subject) || row.Percent != null || row.Amount != null || !string.IsNullOrWhiteSpace(row.Notes);
@@ -680,8 +679,32 @@ public class MainForm : Form
             else { data.ValueAdjustments[0] = new ValueRow(); }
             adj.Refresh();
             FitAdj(); Changed();
-            foreach (var r in recalcs) r();
+        }
+        delRow.Click += (_, _) => DeleteAdjRow(adj.CurrentRow?.Index ?? -1);
+
+        // Delete key removes the selected row (while not typing inside a cell); right-click opens a row menu.
+        adj.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
+        adj.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Delete && !adj.IsCurrentCellInEditMode && adj.CurrentRow != null)
+            { e.Handled = true; DeleteAdjRow(adj.CurrentRow.Index); }
         };
+        var menu = new ContextMenuStrip { RightToLeft = RightToLeft.Yes };
+        var miDel = new ToolStripMenuItem("מחק שורה", null, (_, _) => DeleteAdjRow(adj.CurrentRow?.Index ?? -1)) { ShortcutKeyDisplayString = "Delete" };
+        var miAdd = new ToolStripMenuItem("הוסף שורה", null, (_, _) => addRow.PerformClick());
+        menu.Items.Add(miDel); menu.Items.Add(miAdd);
+        menu.Opening += (_, _) =>
+        {
+            miAdd.Enabled = data.ValueAdjustments.Count < MaxAdj;
+            miDel.Text = data.ValueAdjustments.Count > 1 ? $"מחק שורה {(adj.CurrentRow?.Index ?? 0) + 1}" : "נקה שורה";
+        };
+        adj.CellMouseDown += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Right || e.RowIndex < 0) return;
+            adj.EndEdit();
+            adj.CurrentCell = adj.Rows[e.RowIndex].Cells[Math.Max(0, e.ColumnIndex)];
+        };
+        adj.ContextMenuStrip = menu;
         adjBar.Controls.Add(addRow); adjBar.Controls.Add(delRow); adjBar.Controls.Add(rowsInfo);
         FitAdj();
 
