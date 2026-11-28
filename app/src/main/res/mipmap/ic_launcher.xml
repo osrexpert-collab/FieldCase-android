@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- אייקון לאנדרואיד 7 (API 24-25). מגרסה 8 ואילך משתמשים ב-mipmap-anydpi-v26 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item><shape android:shape="oval"><solid android:color="@color/ic_bg" /></shape></item>
+    <item android:drawable="@drawable/ic_fg" />
+</layer-list>

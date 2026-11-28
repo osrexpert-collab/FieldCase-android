@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- לוחית רישוי צהובה עם פס כחול, במרכז אזור הבטוח של אייקון אדפטיבי -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#111111" android:pathData="M28,41h52a4,4 0,0 1,4 4v18a4,4 0,0 1,-4 4h-52a4,4 0,0 1,-4 -4v-18a4,4 0,0 1,4 -4z"/>
+    <path android:fillColor="#F7D117" android:pathData="M37,44h42a2,2 0,0 1,2 2v16a2,2 0,0 1,-2 2h-42z"/>
+    <path android:fillColor="#1C4F9C" android:pathData="M29,44h8v20h-8a2,2 0,0 1,-2 -2v-16a2,2 0,0 1,2 -2z"/>
+    <path android:fillColor="#111111" android:pathData="M44,50h4v8h-4zM51,50h4v8h-4zM60,50h4v8h-4zM67,50h4v8h-4zM74,50h3v8h-3z"/>
+</vector>
