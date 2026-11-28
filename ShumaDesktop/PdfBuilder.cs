@@ -355,7 +355,7 @@ public static class PdfBuilder
         c.Item().PaddingBottom(6).AlignRight().Border(0.8f).BorderColor(Line).PaddingHorizontal(10).PaddingVertical(1).Text(text).FontSize(13);
 
     static void SectionBox(ColumnDescriptor col, string text) =>
-        col.Item().EnsureSpace(90).PaddingTop(8).AlignRight().MinWidth(110).Border(0.8f).BorderColor(Line).PaddingHorizontal(8).PaddingVertical(1).Text(text).FontSize(13);
+        col.Item().EnsureSpace(150).PaddingTop(8).AlignRight().MinWidth(110).Border(0.8f).BorderColor(Line).PaddingHorizontal(8).PaddingVertical(1).Text(text).FontSize(13);
 
     static void KV(ColumnDescriptor c, (string, string)[] rows) =>
         c.Item().Table(t =>
