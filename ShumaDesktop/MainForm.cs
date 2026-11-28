@@ -627,8 +627,12 @@ public class MainForm : Form
         Add(val, Lbl("ערך רכב מחירון ₪", true), Dec(() => data.ListValue, v => data.ListValue = v),
                  Lbl("סה\"כ שווי ערך רכב בפועל", true), Out(() => Num.Shekel(data.ActualValue)));
 
-        var adj = new DataGridView { Height = 170 };
+        const int MaxAdj = 5;
+        if (data.ValueAdjustments.Count == 0) data.ValueAdjustments.Add(new ValueRow());
+        var adj = new DataGridView();
         StyleGrid(adj); adj.Dock = DockStyle.None;
+        adj.AllowUserToAddRows = false; adj.AllowUserToDeleteRows = false;
+        adj.ScrollBars = ScrollBars.None;
         adj.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(ValueRow.Subject), HeaderText = "נושא (למשל: הפחתה בגין מס' ק\"מ)", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 50 });
         var sign = new DataGridViewComboBoxColumn { DataPropertyName = nameof(ValueRow.Sign), HeaderText = "-/+", Width = 55, FlatStyle = FlatStyle.Flat };
         sign.Items.AddRange("-", "+");
@@ -643,6 +647,38 @@ public class MainForm : Form
         adj.DataSource = data.ValueAdjustments;
         HookGrid(adj);
 
+        var adjBar = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+        var addRow = new System.Windows.Forms.Button { Text = "+ הוסף שורה", AutoSize = true, BackColor = Color.FromArgb(247, 201, 72) };
+        var delRow = new System.Windows.Forms.Button { Text = "− מחק שורה", AutoSize = true };
+        var rowsInfo = new Label { AutoSize = true, ForeColor = Color.DimGray, Padding = new Padding(8, 7, 0, 0) };
+        void FitAdj()
+        {
+            int n = data.ValueAdjustments.Count;
+            adj.Height = adj.ColumnHeadersHeight + n * adj.RowTemplate.Height + 4;
+            addRow.Enabled = n < MaxAdj; delRow.Enabled = n > 1;
+            rowsInfo.Text = $"{n} מתוך {MaxAdj} שורות";
+        }
+        addRow.Click += (_, _) =>
+        {
+            if (data.ValueAdjustments.Count >= MaxAdj) return;
+            adj.EndEdit();
+            data.ValueAdjustments.Add(new ValueRow());
+            FitAdj(); Changed();
+            adj.CurrentCell = adj.Rows[adj.Rows.Count - 1].Cells[0];
+        };
+        delRow.Click += (_, _) =>
+        {
+            if (data.ValueAdjustments.Count <= 1) return;
+            adj.EndEdit();
+            int i = adj.CurrentRow?.Index ?? data.ValueAdjustments.Count - 1;
+            if (i < 0 || i >= data.ValueAdjustments.Count) i = data.ValueAdjustments.Count - 1;
+            data.ValueAdjustments.RemoveAt(i);
+            FitAdj(); Changed();
+            foreach (var r in recalcs) r();
+        };
+        adjBar.Controls.Add(addRow); adjBar.Controls.Add(delRow); adjBar.Controls.Add(rowsInfo);
+        FitAdj();
+
         var raw = Grid(4);
         Add(raw, Lbl("אחוז הנזק הגולמי", true), Out(() => data.RawPercent == null ? "—" : Num.Pct(data.RawPercent)),
                  Lbl("חישוב לפי"), VatCombo(() => data.RawIncludesVat, v => data.RawIncludesVat = v));
@@ -652,6 +688,7 @@ public class MainForm : Form
         root.Controls.Add(Section("פירוט שווי רכב בפועל"));
         root.Controls.Add(val);
         root.Controls.Add(adj);
+        root.Controls.Add(adjBar);
         root.Controls.Add(raw);
         root.Controls.Add(Section("הערות (שורה לכל הערה)"));
         root.Controls.Add(Str(() => data.Notes, v => data.Notes = v, true, 130));
