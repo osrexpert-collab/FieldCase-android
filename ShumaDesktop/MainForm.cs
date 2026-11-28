@@ -17,7 +17,7 @@ public class MainForm : Form
     readonly ToolStrip bar = new() { GripStyle = ToolStripGripStyle.Hidden, Padding = new Padding(6), ImageScalingSize = new Size(20, 20) };
     readonly List<Action> recalcs = new();
 
-    static readonly string[] PartTypes = { "", "מקורי", "תואם", "משומש", "חליפי" };
+    static readonly string[] PartTypes = { "מקורי", "תואם", "משומש", "חליפי", "" };
     static readonly string[] VatModes = { "כולל מע\"מ", "לא כולל מע\"מ" };
     static readonly Font UiFont = new("Segoe UI", 10f);
     static readonly Font BoldFont = new("Segoe UI", 10f, FontStyle.Bold);
@@ -37,12 +37,16 @@ public class MainForm : Form
         Button(bar, "שמור", (_, _) => Save(false));
         Button(bar, "שמור בשם…", (_, _) => Save(true));
         bar.Items.Add(new ToolStripSeparator());
+        var addF = Button(bar, "+ הוסף מוקד נזק", (_, _) => AddFocus());
+        addF.Font = BoldFont; addF.BackColor = Color.FromArgb(247, 201, 72);
+        bar.Items.Add(new ToolStripSeparator());
         var pdf = Button(bar, "הפק PDF", (_, _) => MakePdf());
         pdf.Font = BoldFont; pdf.ForeColor = Color.DarkBlue;
 
         Controls.Add(tabs);
         Controls.Add(bar);
         if (string.IsNullOrWhiteSpace(data.Notes)) data.Notes = settings.DefaultNotes;
+        if (string.IsNullOrWhiteSpace(data.InspectingAppraiser)) data.InspectingAppraiser = settings.AppraiserName;
         BuildUi();
         FormClosing += (_, e) => { if (!ConfirmDiscard()) e.Cancel = true; };
     }
@@ -58,7 +62,7 @@ public class MainForm : Form
     void NewCase()
     {
         if (!ConfirmDiscard()) return;
-        data = new CaseData { Notes = settings.DefaultNotes };
+        data = new CaseData { Notes = settings.DefaultNotes, InspectingAppraiser = settings.AppraiserName };
         currentPath = null; BuildUi(); dirty = false; UpdateTitle();
     }
 
@@ -147,8 +151,10 @@ public class MainForm : Form
         foreach (TabPage p in tabs.TabPages) p.Dispose();
         tabs.TabPages.Clear();
         tabs.TabPages.Add(DetailsTab());
+        tabs.TabPages.Add(TextsTab());
         tabs.TabPages.Add(FociTab());
         tabs.TabPages.Add(SummaryTab());
+        tabs.TabPages.Add(DepreciationTab());
         tabs.TabPages.Add(FeeTab());
         tabs.TabPages.Add(PhotosTab());
         tabs.TabPages.Add(SettingsTab());
@@ -227,175 +233,235 @@ public class MainForm : Form
         }
     }
 
+    // ---------- helpers for form sections ----------
+    FlowLayoutPanel Root()
+    {
+        var root = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
+        root.Resize += (_, _) => FitWidth(root);
+        return root;
+    }
+
+    void Pairs(TableLayoutPanel g, params (string label, Func<string> get, Action<string> set)[] items)
+    {
+        foreach (var (label, get, set) in items) Add(g, Lbl(label), Str(get, set));
+        if (items.Length % 2 == 1) Add(g, new Label(), new Label());
+    }
+
     // ---------- tab: details ----------
     TabPage DetailsTab()
     {
         var page = Page("פרטים");
-        var root = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
+        var root = Root();
+        var d = data;
 
-        var head = Grid(4);
-        Add(head, Lbl("כותרת המסמך", true), Combo(new[] { "חוות דעת", "אומדן הנזק" }, () => data.DocTitle, v => data.DocTitle = v),
-                  Lbl("מספר חוות דעת", true), Str(() => data.OpinionNo, v => data.OpinionNo = v));
-        Add(head, Lbl("תאריך"), Str(() => data.DocDate, v => data.DocDate = v), Lbl("תיק"), Str(() => data.FileNo, v => data.FileNo = v));
-        Add(head, Lbl("ע.מ."), Str(() => data.VatId, v => data.VatId = v),
-                  Lbl("מצב הרכב"), Combo(new[] { "רכב תוקן בפועל", "פיצוי מוסכם", "אובדן להלכה", "אובדן מוחלט", "" }, () => data.RepairStatus, v => data.RepairStatus = v));
-        Add(head, Lbl("לכבוד"), Str(() => data.ToName, v => data.ToName = v), Lbl("כתובת"), Str(() => data.ToAddress, v => data.ToAddress = v));
-        Add(head, Lbl("טלפון"), Str(() => data.ToPhone, v => data.ToPhone = v), new Label(), new Label());
+        var doc = Grid(4);
+        Add(doc, Lbl("כותרת", true), Combo(new[] { "חוות דעת", "אומדן הנזק" }, () => d.DocTitle, v => d.DocTitle = v),
+                 Lbl("מספר חוות דעת", true), Str(() => d.OpinionNo, v => d.OpinionNo = v));
+        Add(doc, Lbl("תאריך"), Str(() => d.DocDate, v => d.DocDate = v),
+                 Lbl("סטטוס"), Combo(new[] { "", "פיצוי מוסכם", "אובדן להלכה", "אובדן מוחלט", "רכב תוקן בפועל" }, () => d.Status, v => d.Status = v));
+        Pairs(doc, ("לכבוד", () => d.ToName, v => d.ToName = v), ("כתובת", () => d.ToAddress, v => d.ToAddress = v), ("מיקוד", () => d.ToZip, v => d.ToZip = v));
+
+        var ins = Grid(4);
+        Pairs(ins,
+            ("שם מבוטח", () => d.InsuredName, v => d.InsuredName = v), ("מבטח", () => d.Insurer, v => d.Insurer = v),
+            ("שמאי בודק", () => d.InspectingAppraiser, v => d.InspectingAppraiser = v), ("תאריך אירוע", () => d.EventDate, v => d.EventDate = v),
+            ("תאריך בדיקה", () => d.InspectionDate, v => d.InspectionDate = v), ("מקום בדיקה", () => d.InspectionPlace, v => d.InspectionPlace = v),
+            ("מוסך", () => d.Garage, v => d.Garage = v), ("סוג תיק", () => d.CaseType, v => d.CaseType = v),
+            ("תאריך רישוי", () => d.LicenseDate, v => d.LicenseDate = v), ("מספר פוליסה", () => d.PolicyNo, v => d.PolicyNo = v),
+            ("מספר תביעה", () => d.ClaimNo, v => d.ClaimNo = v), ("ת.ז. מבוטח", () => d.InsuredId, v => d.InsuredId = v),
+            ("טלפון מבוטח", () => d.InsuredPhone, v => d.InsuredPhone = v), ("הסניף", () => d.Branch, v => d.Branch = v));
 
         var veh = Grid(4);
-        void Pair(string l1, Func<string> g1, Action<string> s1, string l2, Func<string> g2, Action<string> s2) =>
-            Add(veh, Lbl(l1), Str(g1, s1), Lbl(l2), Str(g2, s2));
-        Pair("המזמין/בעל הרכב", () => data.Owner, v => data.Owner = v, "מס' רישוי", () => data.LicenseNo, v => data.LicenseNo = v);
-        Pair("תאריך אירוע", () => data.EventDate, v => data.EventDate = v, "מד אוץ", () => data.Odometer, v => data.Odometer = v);
-        Pair("תאריך בדיקה", () => data.InspectionDate, v => data.InspectionDate = v, "מס' שילדה", () => data.Vin, v => data.Vin = v);
-        Pair("מקום הבדיקה", () => data.InspectionPlace, v => data.InspectionPlace = v, "שנת יצור", () => data.Year, v => data.Year = v);
-        Pair("בעלויות", () => data.Ownership, v => data.Ownership = v, "סוג רכב", () => data.VehicleType, v => data.VehicleType = v);
-        Pair("תוצר ודגם", () => data.MakeModel, v => data.MakeModel = v, "סוג חוות דעת", () => data.OpinionType, v => data.OpinionType = v);
+        Pairs(veh,
+            ("מספר רישוי", () => d.LicenseNo, v => d.LicenseNo = v), ("יצרן", () => d.Manufacturer, v => d.Manufacturer = v),
+            ("דגם", () => d.Model, v => d.Model = v), ("שנת יצור", () => d.Year, v => d.Year = v),
+            ("קוד דגם", () => d.ModelCode, v => d.ModelCode = v), ("מד אוץ", () => d.Odometer, v => d.Odometer = v),
+            ("מספר שלדה", () => d.Vin, v => d.Vin = v), ("מקוריות רכב", () => d.Originality, v => d.Originality = v),
+            ("סוג רכב", () => d.VehicleType, v => d.VehicleType = v), ("מספר בעלים", () => d.OwnersCount, v => d.OwnersCount = v),
+            ("קוד משרד התחבורה", () => d.MotCode, v => d.MotCode = v));
 
-        var circ = Str(() => data.Circumstances, v => data.Circumstances = v, true, 70);
-        circ.Dock = DockStyle.None; circ.Width = 900;
+        var own = Grid(4);
+        var ownName = Str(() => d.OwnerName, v => d.OwnerName = v);
+        var ownPhone = Str(() => d.OwnerPhone, v => d.OwnerPhone = v);
+        var ownAddr = Str(() => d.OwnerAddress, v => d.OwnerAddress = v);
+        var ownZip = Str(() => d.OwnerZip, v => d.OwnerZip = v);
+        Add(own, Lbl("שם"), ownName, Lbl("מספר טלפון"), ownPhone, Lbl("כתובת"), ownAddr, Lbl("מיקוד"), ownZip);
+        var copy = new System.Windows.Forms.Button { Text = "העתק פרטים מהמבוטח ומ\"לכבוד\"", AutoSize = true };
+        copy.Click += (_, _) =>
+        {
+            if (ownName.Text.Length == 0) ownName.Text = d.InsuredName;
+            if (ownPhone.Text.Length == 0) ownPhone.Text = d.InsuredPhone;
+            if (ownAddr.Text.Length == 0) ownAddr.Text = d.ToAddress;
+            if (ownZip.Text.Length == 0) ownZip.Text = d.ToZip;
+        };
 
         root.Controls.Add(Section("פרטי המסמך"));
-        root.Controls.Add(head);
-        root.Controls.Add(Section("פרטי הרכב"));
+        root.Controls.Add(doc);
+        root.Controls.Add(Section("פרטים ביטוחיים"));
+        root.Controls.Add(ins);
+        root.Controls.Add(Section("פרטי רכב"));
         root.Controls.Add(veh);
-        root.Controls.Add(Section("נסיבות המקרה"));
-        root.Controls.Add(circ);
-        root.Resize += (_, _) => FitWidth(root);
+        root.Controls.Add(Section("פרטי בעל הרכב"));
+        root.Controls.Add(own);
+        root.Controls.Add(copy);
         page.Controls.Add(root);
         return page;
     }
 
-    // ---------- tab: foci (works + parts per focus) ----------
+    // ---------- tab: texts ----------
+    TabPage TextsTab()
+    {
+        var page = Page("מבוא ונסיבות");
+        var root = Root();
+        root.Controls.Add(Section("מבוא"));
+        root.Controls.Add(Str(() => data.Intro, v => data.Intro = v, true, 90));
+        root.Controls.Add(Section("נסיבות המקרה"));
+        root.Controls.Add(Str(() => data.Circumstances, v => data.Circumstances = v, true, 70));
+        root.Controls.Add(Section("תיאור הנזקים"));
+        root.Controls.Add(Str(() => data.DamageDescription, v => data.DamageDescription = v, true, 70));
+        page.Controls.Add(root);
+        return page;
+    }
+
+    // ---------- tab: damage foci ----------
+    TabControl fociTabs;
+    TabPage fociPage;
+
     TabPage FociTab()
     {
-        var page = Page("מוקדים: עבודות וחלקים");
-        var split = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-        split.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
-        split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-
-        // left: list of foci
-        var side = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 4 };
-        side.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        side.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        side.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        side.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var list = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, Font = BoldFont };
-        var addFocus = new System.Windows.Forms.Button { Text = "+ הוסף מוקד", Dock = DockStyle.Fill, Height = 34, BackColor = Color.FromArgb(247, 201, 72) };
-        var delFocus = new System.Windows.Forms.Button { Text = "− הסר מוקד", Dock = DockStyle.Fill, Height = 30 };
-        side.Controls.Add(Lbl("מוקדי נזק", true), 0, 0);
-        side.Controls.Add(list, 0, 1);
-        side.Controls.Add(addFocus, 0, 2);
-        side.Controls.Add(delFocus, 0, 3);
-
-        // right: editor of the selected focus
-        var editor = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 6, ColumnCount = 1 };
-        editor.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        editor.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        editor.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
-        editor.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        editor.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
-        editor.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var nameRow = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top, WrapContents = false };
-        var nameBox = new TextBox { Width = 260 };
-        nameRow.Controls.Add(Lbl("סה\"כ נזק למוקד", true));
-        nameRow.Controls.Add(nameBox);
-        nameRow.Controls.Add(Lbl("(לדוגמה: הקדמי, האחורי)"));
-
-        var works = new DataGridView();
-        var parts = new DataGridView();
-        StyleGrid(works); StyleGrid(parts);
-        works.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(WorkRow.Description), HeaderText = "תיאור עבודות", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
-        works.Columns.Add(MoneyColumn(nameof(WorkRow.Cost), "עלות עבודות"));
-        parts.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PartRow.Description), HeaderText = "תיאור החלק", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
-        var typeCol = new DataGridViewComboBoxColumn { DataPropertyName = nameof(PartRow.Type), HeaderText = "סוג החלק", Width = 120, FlatStyle = FlatStyle.Flat, DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox };
-        typeCol.Items.AddRange(PartTypes);
-        parts.Columns.Add(typeCol);
-        parts.Columns.Add(MoneyColumn(nameof(PartRow.Price), "מחיר החלק"));
-
-        var wTotal = new Label { AutoSize = true, Font = BoldFont, Padding = new Padding(0, 4, 0, 4) };
-        var pTotal = new Label { AutoSize = true, Font = BoldFont, Padding = new Padding(0, 4, 0, 4) };
-        var fTotal = new Label { AutoSize = true, Font = new Font("Segoe UI", 11f, FontStyle.Bold), ForeColor = Color.FromArgb(0, 0, 115), Padding = new Padding(0, 6, 0, 0) };
-
-        editor.Controls.Add(nameRow, 0, 0);
-        editor.Controls.Add(Section("פירוט העבודות (שורה חדשה נוספת אוטומטית בסוף הטבלה)"), 0, 1);
-        var wPanel = new Panel { Dock = DockStyle.Fill }; wPanel.Controls.Add(works); wPanel.Controls.Add(wTotal); wTotal.Dock = DockStyle.Bottom;
-        editor.Controls.Add(wPanel, 0, 2);
-        editor.Controls.Add(Section("פירוט החלקים"), 0, 3);
-        var pPanel = new Panel { Dock = DockStyle.Fill }; pPanel.Controls.Add(parts); pPanel.Controls.Add(pTotal); pTotal.Dock = DockStyle.Bottom;
-        editor.Controls.Add(pPanel, 0, 4);
-        editor.Controls.Add(fTotal, 0, 5);
-
-        FocusData cur = null;
-        void RefreshList()
-        {
-            var sel = list.SelectedIndex;
-            list.Items.Clear();
-            for (int i = 0; i < data.Foci.Count; i++)
-                list.Items.Add($"מוקד {i + 1}" + (string.IsNullOrWhiteSpace(data.Foci[i].Name) ? "" : " - " + data.Foci[i].Name));
-            list.SelectedIndex = Math.Min(Math.Max(sel, 0), list.Items.Count - 1);
-        }
-        void Totals()
-        {
-            if (cur == null) return;
-            wTotal.Text = "סה\"כ עבודות: " + Num.Money(cur.WorksTotal) + " ₪";
-            pTotal.Text = "סה\"כ חלקים: " + Num.Money(cur.PartsTotal) + " ₪";
-            fTotal.Text = "סה\"כ נזק למוקד: " + Num.Money(cur.Total) + " ₪";
-        }
-        recalcs.Add(Totals);
-        void ShowFocus(int i)
-        {
-            if (i < 0 || i >= data.Foci.Count) return;
-            cur = data.Foci[i];
-            var was = loading;
-            loading = true;
-            nameBox.Text = cur.Name ?? "";
-            works.DataSource = cur.Works;
-            parts.DataSource = cur.Parts;
-            loading = was;
-            Totals();
-        }
-        list.SelectedIndexChanged += (_, _) => ShowFocus(list.SelectedIndex);
-        nameBox.TextChanged += (_, _) =>
-        {
-            if (loading || cur == null) return;
-            cur.Name = nameBox.Text;
-            var i = list.SelectedIndex;
-            list.Items[i] = $"מוקד {i + 1}" + (string.IsNullOrWhiteSpace(cur.Name) ? "" : " - " + cur.Name);
-            Changed();
-        };
-        addFocus.Click += (_, _) =>
-        {
-            data.Foci.Add(new FocusData());
-            RefreshList(); list.SelectedIndex = data.Foci.Count - 1; nameBox.Focus(); Changed();
-        };
-        delFocus.Click += (_, _) =>
+        var page = Page("מוקדי נזק"); fociPage = page;
+        var top = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(0, 0, 0, 6) };
+        var add = new System.Windows.Forms.Button { Text = "+ הוסף מוקד נזק", AutoSize = true, Font = BoldFont, BackColor = Color.FromArgb(247, 201, 72), Padding = new Padding(10, 4, 10, 4) };
+        var del = new System.Windows.Forms.Button { Text = "− הסר את המוקד הפתוח", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
+        top.Controls.Add(add); top.Controls.Add(del);
+        top.Controls.Add(Lbl("לכל מוקד יש לשונית משלו, עם עבודות, צבע וחלקי חילוף."));
+        fociTabs = new TabControl { Dock = DockStyle.Fill, RightToLeftLayout = true };
+        add.Click += (_, _) => AddFocus();
+        del.Click += (_, _) =>
         {
             if (data.Foci.Count <= 1) { Msg("חייב להישאר לפחות מוקד אחד."); return; }
-            var i = list.SelectedIndex;
-            if (MessageBox.Show(this, $"למחוק את {list.Items[i]} עם כל העבודות והחלקים שלו?", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+            var i = fociTabs.SelectedIndex;
+            if (MessageBox.Show(this, $"למחוק את \"{fociTabs.TabPages[i].Text}\" עם כל העבודות והחלקים שלו?", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
                 MessageBoxDefaultButton.Button2, MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign) != DialogResult.Yes) return;
-            data.Foci.RemoveAt(i); RefreshList(); Changed();
+            data.Foci.RemoveAt(i); RebuildFoci(Math.Max(0, i - 1)); Changed();
         };
-        foreach (var g in new[] { works, parts })
-        {
-            g.CellValueChanged += (_, _) => Changed();
-            g.UserDeletedRow += (_, _) => Changed();
-            g.RowsAdded += (_, _) => Changed();
-        }
-
-        split.Controls.Add(side, 0, 0);
-        split.Controls.Add(editor, 1, 0);
-        page.Controls.Add(split);
-        RefreshList();
-        ShowFocus(0);
+        page.Controls.Add(fociTabs);
+        page.Controls.Add(top);
+        RebuildFoci(0);
         return page;
+    }
+
+    void AddFocus()
+    {
+        data.Foci.Add(new FocusData());
+        tabs.SelectedTab = fociPage;
+        RebuildFoci(data.Foci.Count - 1);
+        Changed();
+    }
+
+    static string FocusTitle(FocusData f, int i) => $"מוקד {i + 1}" + (string.IsNullOrWhiteSpace(f.Name) ? "" : " - " + f.Name);
+
+    void RebuildFoci(int select)
+    {
+        var was = loading; loading = true;
+        foreach (TabPage p in fociTabs.TabPages) p.Dispose();
+        fociTabs.TabPages.Clear();
+        recalcs.RemoveAll(r => r.Target is FocusTotals);
+        for (int i = 0; i < data.Foci.Count; i++) fociTabs.TabPages.Add(FocusPage(data.Foci[i], i));
+        fociTabs.SelectedIndex = Math.Min(select, fociTabs.TabCount - 1);
+        loading = was;
+        foreach (var r in recalcs) r();
+    }
+
+    class FocusTotals { public Action Run; public void Invoke() => Run(); }
+
+    TabPage FocusPage(FocusData f, int index)
+    {
+        var page = new TabPage(FocusTitle(f, index)) { Padding = new Padding(6), RightToLeft = RightToLeft.Yes };
+        var t = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 8 };
+        t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        t.RowStyles.Add(new RowStyle(SizeType.Percent, 30));
+        t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        t.RowStyles.Add(new RowStyle(SizeType.Percent, 22));
+        t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        t.RowStyles.Add(new RowStyle(SizeType.Percent, 48));
+        t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        var nameRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+        var name = new TextBox { Width = 320, Text = f.Name ?? "", Font = BoldFont };
+        nameRow.Controls.Add(Lbl("שם המוקד", true));
+        nameRow.Controls.Add(name);
+        nameRow.Controls.Add(Lbl("לדוגמה: נזק בחזית צד ימין, הקדמי, האחורי"));
+        name.TextChanged += (_, _) => { if (loading) return; f.Name = name.Text; page.Text = FocusTitle(f, index); Changed(); };
+
+        var works = CostGrid(f.Works, "תיאור עבודה", "עלות עבודה");
+        var paint = CostGrid(f.Paint, "עבודות צבע", "עלות");
+        var parts = new DataGridView(); StyleGrid(parts);
+        parts.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PartRow.Description), HeaderText = "תיאור החלק", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 60 });
+        parts.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(PartRow.CatalogNo), HeaderText = "מק\"ט", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 30 });
+        var typeCol = new DataGridViewComboBoxColumn { DataPropertyName = nameof(PartRow.Type), HeaderText = "סוג החלק", Width = 110, FlatStyle = FlatStyle.Flat, DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox };
+        typeCol.Items.AddRange(PartTypes);
+        parts.Columns.Add(typeCol);
+        parts.Columns.Add(MoneyColumn(nameof(PartRow.Price), "סה\"כ מחיר"));
+        parts.DataSource = f.Parts;
+        HookGrid(parts);
+
+        var wTot = TotalLabel(); var pnTot = TotalLabel(); var pTot = TotalLabel();
+        var fTot = new Label { AutoSize = true, Font = new Font("Segoe UI", 11f, FontStyle.Bold), ForeColor = Color.FromArgb(0, 0, 115), Padding = new Padding(0, 6, 0, 0) };
+        var holder = new FocusTotals();
+        holder.Run = () =>
+        {
+            wTot.Text = "סה\"כ עבודות ועבודות נלוות: " + Num.Shekel(f.WorksTotal);
+            pnTot.Text = "סה\"כ עבודות צבע: " + Num.Shekel(f.PaintTotal);
+            pTot.Text = "מחיר חלקי חילוף: " + Num.Shekel(f.PartsTotal);
+            fTot.Text = $"סה\"כ נזק למוקד: {Num.Shekel(f.Total)}    מע\"מ: {Num.Shekel(data.FocusVat(f))}    כולל מע\"מ: {Num.Shekel(f.Total + data.FocusVat(f))}";
+        };
+        recalcs.Add(holder.Invoke);
+
+        t.Controls.Add(nameRow, 0, 0);
+        t.Controls.Add(GridTitle("עבודות", wTot), 0, 1);
+        t.Controls.Add(works, 0, 2);
+        t.Controls.Add(GridTitle("צבע", pnTot), 0, 3);
+        t.Controls.Add(paint, 0, 4);
+        t.Controls.Add(GridTitle("חלקי חילוף", pTot), 0, 5);
+        t.Controls.Add(parts, 0, 6);
+        t.Controls.Add(fTot, 0, 7);
+        page.Controls.Add(t);
+        return page;
+    }
+
+    static Label TotalLabel() => new() { AutoSize = true, Font = BoldFont, Padding = new Padding(20, 8, 0, 0) };
+
+    static Control GridTitle(string text, Label total)
+    {
+        var p = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+        p.Controls.Add(new Label { Text = text, AutoSize = true, Font = new Font("Segoe UI", 11.5f, FontStyle.Bold), ForeColor = Color.FromArgb(31, 59, 115), Padding = new Padding(0, 6, 0, 2) });
+        p.Controls.Add(total);
+        return p;
+    }
+
+    DataGridView CostGrid(BindingList<CostRow> rows, string descHeader, string costHeader)
+    {
+        var g = new DataGridView(); StyleGrid(g);
+        g.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(CostRow.Description), HeaderText = descHeader, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
+        g.Columns.Add(MoneyColumn(nameof(CostRow.Cost), costHeader));
+        g.DataSource = rows;
+        HookGrid(g);
+        return g;
+    }
+
+    void HookGrid(DataGridView g)
+    {
+        g.CellValueChanged += (_, _) => Changed();
+        g.UserDeletedRow += (_, _) => Changed();
+        g.CellEndEdit += (_, _) => Changed();
     }
 
     static DataGridViewTextBoxColumn MoneyColumn(string prop, string header) => new()
     {
         DataPropertyName = prop, HeaderText = header, Width = 130,
-        DefaultCellStyle = new DataGridViewCellStyle { Format = "#,##0.##", Alignment = DataGridViewContentAlignment.MiddleLeft, NullValue = "" },
+        DefaultCellStyle = new DataGridViewCellStyle { Format = "#,##0.00", Alignment = DataGridViewContentAlignment.MiddleLeft, NullValue = "" },
         ValueType = typeof(decimal?)
     };
 
@@ -412,63 +478,75 @@ public class MainForm : Form
         g.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(237, 237, 237);
         g.ColumnHeadersDefaultCellStyle.Font = BoldFont;
         g.EditMode = DataGridViewEditMode.EditOnEnter;
-        g.DataError += (_, e) => { e.ThrowException = false; Msg("ערך לא תקין. בעמודות הסכום יש להקליד מספר בלבד."); };
+        g.DataError += (_, e) => { e.ThrowException = false; Msg("ערך לא תקין. בעמודות הסכום והאחוז יש להקליד מספר בלבד."); };
         g.CurrentCellDirtyStateChanged += (_, _) => { if (g.IsCurrentCellDirty && g.CurrentCell is DataGridViewComboBoxCell) g.CommitEdit(DataGridViewDataErrorContexts.Commit); };
     }
 
-    // ---------- tab: summary, raw damage, depreciation, notes ----------
+    // ---------- tab: summary and vehicle value ----------
     TabPage SummaryTab()
     {
-        var page = Page("סיכום וירידת ערך");
-        var root = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
+        var page = Page("סיכום ושווי רכב");
+        var root = Root();
 
         var sum = Grid(4);
-        Add(sum, Lbl("סה\"כ נזק (כל המוקדים)", true), Out(() => Num.Money(data.DamageTotal) + " ₪"),
+        Add(sum, Lbl("סה\"כ הוצאות", true), Out(() => Num.Shekel(data.Expenses)),
                  Lbl("אחוז מע\"מ"), Dec(() => data.VatPercent, v => data.VatPercent = v ?? 0));
-        Add(sum, Lbl("סה\"כ"), VatCombo(() => data.TotalIncludesVat, v => data.TotalIncludesVat = v),
-                 Lbl("מע\"מ"), Out(() => data.TotalIncludesVat ? Num.Money(data.DamageVat, 2) + " ₪" : "—"));
-        Add(sum, Lbl("סה\"כ לתשלום", true), Out(() => Num.Money(data.TotalFinal, data.TotalIncludesVat ? 2 : 0) + " ₪"), new Label(), new Label());
+        Add(sum, Lbl("מע\"מ"), Out(() => Num.Shekel(data.ExpensesVat)),
+                 Lbl("סה\"כ כולל מע\"מ", true), Out(() => Num.Shekel(data.ExpensesGross)));
+
+        var val = Grid(4);
+        Add(val, Lbl("ערך רכב מחירון ₪", true), Dec(() => data.ListValue, v => data.ListValue = v),
+                 Lbl("סה\"כ שווי ערך רכב בפועל", true), Out(() => Num.Shekel(data.ActualValue)));
+
+        var adj = new DataGridView { Height = 170 };
+        StyleGrid(adj); adj.Dock = DockStyle.None;
+        adj.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(ValueRow.Subject), HeaderText = "נושא (למשל: הפחתה בגין מס' ק\"מ)", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 50 });
+        var sign = new DataGridViewComboBoxColumn { DataPropertyName = nameof(ValueRow.Sign), HeaderText = "-/+", Width = 55, FlatStyle = FlatStyle.Flat };
+        sign.Items.AddRange("-", "+");
+        adj.Columns.Add(sign);
+        adj.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            DataPropertyName = nameof(ValueRow.Percent), HeaderText = "באחוז", Width = 80, ValueType = typeof(decimal?),
+            DefaultCellStyle = new DataGridViewCellStyle { Format = "0.00", Alignment = DataGridViewContentAlignment.MiddleCenter, NullValue = "" }
+        });
+        adj.Columns.Add(MoneyColumn(nameof(ValueRow.Amount), "סכום (ריק = לפי האחוז)"));
+        adj.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(ValueRow.Notes), HeaderText = "הערות", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, FillWeight = 30 });
+        adj.DataSource = data.ValueAdjustments;
+        HookGrid(adj);
 
         var raw = Grid(4);
-        Add(raw, Lbl("ערך רכב בסיסי (לוי יצחק) ₪"), Dec(() => data.CarValue, v => data.CarValue = v),
-                 Lbl("ערך הרכב"), VatCombo(() => data.CarValueIncludesVat, v => data.CarValueIncludesVat = v));
-        Add(raw, Lbl("קוד דגם"), Str(() => data.ModelCode, v => data.ModelCode = v),
-                 Lbl("נזק גולמי מערך הרכב"), Out(() => data.RawPercent == null ? "—" : Num.Plain(data.RawPercent) + "%"));
+        Add(raw, Lbl("אחוז הנזק הגולמי", true), Out(() => data.RawPercent == null ? "—" : Num.Pct(data.RawPercent)),
+                 Lbl("חישוב לפי"), VatCombo(() => data.RawIncludesVat, v => data.RawIncludesVat = v));
 
-        var reason = Str(() => data.DeprReason, v => data.DeprReason = v);
-        var depr = new DataGridView { Height = 190 };
-        StyleGrid(depr); depr.Dock = DockStyle.None;
-        depr.Columns.Add(new DataGridViewTextBoxColumn { DataPropertyName = nameof(DeprRow.Factor), HeaderText = "גורם ירידת הערך", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
-        depr.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            DataPropertyName = nameof(DeprRow.Percent), HeaderText = "אחוז", Width = 110, ValueType = typeof(decimal?),
-            DefaultCellStyle = new DataGridViewCellStyle { Format = "0.##", Alignment = DataGridViewContentAlignment.MiddleCenter, NullValue = "" }
-        });
-        depr.DataSource = data.Depreciation;
-        depr.CellValueChanged += (_, _) => Changed(); depr.UserDeletedRow += (_, _) => Changed();
-
-        var dv = Grid(4);
-        Add(dv, Lbl("סה\"כ אחוז ירידת ערך"), Out(() => Num.Plain(data.DeprPercentTotal) + "%"), new Label(), new Label());
-        Add(dv, Lbl("ערך הרכב משוערך ליום האירוע ₪"), Dec(() => data.CarValueEvent, v => data.CarValueEvent = v),
-                Lbl("ערך משוערך"), VatCombo(() => data.CarValueEventIncludesVat, v => data.CarValueEventIncludesVat = v));
-        Add(dv, Lbl("סה\"כ ירידת ערך", true), Out(() => Num.Money(data.DeprTotal) + " ₪"), new Label(), new Label());
-
-        var notes = Str(() => data.Notes, v => data.Notes = v, true, 130);
-        var att = Str(() => data.Attachments, v => data.Attachments = v);
-
-        root.Controls.Add(Section("סיכום הנזק"));
+        root.Controls.Add(Section("סיכום ההוצאות (כל המוקדים)"));
         root.Controls.Add(sum);
-        root.Controls.Add(Section("תחשיב נזק גולמי"));
+        root.Controls.Add(Section("פירוט שווי רכב בפועל"));
+        root.Controls.Add(val);
+        root.Controls.Add(adj);
         root.Controls.Add(raw);
-        root.Controls.Add(Section("ירידת ערך"));
-        root.Controls.Add(reason);
-        root.Controls.Add(depr);
-        root.Controls.Add(dv);
-        root.Controls.Add(Section("הערות"));
-        root.Controls.Add(notes);
+        root.Controls.Add(Section("הערות (שורה לכל הערה)"));
+        root.Controls.Add(Str(() => data.Notes, v => data.Notes = v, true, 130));
         root.Controls.Add(Section("לוט"));
-        root.Controls.Add(att);
-        root.Resize += (_, _) => FitWidth(root);
+        root.Controls.Add(Str(() => data.Attachments, v => data.Attachments = v));
+        page.Controls.Add(root);
+        return page;
+    }
+
+    // ---------- tab: depreciation opinion ----------
+    TabPage DepreciationTab()
+    {
+        var page = Page("ירידת ערך");
+        var root = Root();
+        var inc = new CheckBox { Text = "לצרף חוות דעת לירידת ערך ל-PDF", Checked = data.IncludeDepreciation, AutoSize = true, Font = BoldFont };
+        inc.CheckedChanged += (_, _) => { data.IncludeDepreciation = inc.Checked; Changed(); };
+        var g = Grid(4);
+        Add(g, Lbl("שווי הרכב בפועל"), Out(() => Num.Shekel(data.ActualValue)), Lbl("אחוז ירידת הערך"), Dec(() => data.DeprPercent, v => data.DeprPercent = v));
+        Add(g, Lbl("סכום ירידת הערך", true), Out(() => Num.Shekel(data.DeprAmount)), new Label(), new Label());
+        root.Controls.Add(inc);
+        root.Controls.Add(g);
+        root.Controls.Add(Lbl("שווי הרכב בפועל נלקח מלשונית \"סיכום ושווי רכב\"."));
+        root.Controls.Add(Section("הסיבות לירידת הערך"));
+        root.Controls.Add(Str(() => data.DeprReasons, v => data.DeprReasons = v, true, 200));
         page.Controls.Add(root);
         return page;
     }
@@ -481,15 +559,15 @@ public class MainForm : Form
         var inc = new CheckBox { Text = "לצרף חשבון שכ\"ט ל-PDF", Checked = data.IncludeFee, AutoSize = true, Font = BoldFont };
         inc.CheckedChanged += (_, _) => { data.IncludeFee = inc.Checked; Changed(); };
         var g = Grid(2); g.MinimumSize = new Size(560, 0); g.MaximumSize = new Size(560, 0);
+        Add(g, Lbl("תאריך אישור שכ\"ט"), Str(() => data.FeeDate, v => data.FeeDate = v));
         Add(g, Lbl("שכר טרחה"), Dec(() => data.FeeMain, v => data.FeeMain = v));
         Add(g, Lbl("צילומים"), Dec(() => data.FeePhotos, v => data.FeePhotos = v));
         Add(g, Lbl("נסיעות"), Dec(() => data.FeeTravel, v => data.FeeTravel = v));
         Add(g, Lbl("שונות"), Dec(() => data.FeeMisc, v => data.FeeMisc = v));
-        Add(g, Lbl("עיגול חשבון שכ\"ט"), Dec(() => data.FeeRound, v => data.FeeRound = v));
-        Add(g, Lbl("סה\"כ ללא מע\"מ", true), Out(() => Num.Money(data.FeeNet, 2) + " ₪"));
+        Add(g, Lbl("סה\"כ ללא מע\"מ", true), Out(() => Num.Shekel(data.FeeNet)));
         Add(g, Lbl("אחוז מע\"מ"), Dec(() => data.FeeVatPercent, v => data.FeeVatPercent = v ?? 0));
-        Add(g, Lbl("מע\"מ"), Out(() => Num.Money(data.FeeVat, 2) + " ₪"));
-        Add(g, Lbl("סה\"כ כולל מע\"מ", true), Out(() => Num.Money(data.FeeGross, 2) + " ₪"));
+        Add(g, Lbl("מע\"מ"), Out(() => Num.Shekel(data.FeeVat)));
+        Add(g, Lbl("סה\"כ כולל מע\"מ", true), Out(() => Num.Shekel(data.FeeGross)));
         root.Controls.Add(inc);
         root.Controls.Add(g);
         page.Controls.Add(root);
@@ -587,15 +665,17 @@ public class MainForm : Form
             tb.TextChanged += (_, _) => st(tb.Text);
             return tb;
         }
-        var g1 = Grid(2); g1.MinimumSize = new Size(860, 0); g1.MaximumSize = new Size(860, 0);
-        Add(g1, Lbl("שורת כותרת"), T(() => s.OfficeTitle, v => s.OfficeTitle = v));
-        Add(g1, Lbl("כתובת"), T(() => s.Address, v => s.Address = v));
-        Add(g1, Lbl("נייד"), T(() => s.Mobile, v => s.Mobile = v));
+        var g1 = Grid(2); g1.MinimumSize = new Size(880, 0); g1.MaximumSize = new Size(880, 0);
+        Add(g1, Lbl("שם המשרד (כותרת)"), T(() => s.OfficeName, v => s.OfficeName = v));
+        Add(g1, Lbl("שם השמאי"), T(() => s.AppraiserName, v => s.AppraiserName = v));
+        Add(g1, Lbl("כתובת המשרד"), T(() => s.Address, v => s.Address = v));
+        Add(g1, Lbl("אימייל"), T(() => s.Email, v => s.Email = v));
         Add(g1, Lbl("פקס"), T(() => s.Fax, v => s.Fax = v));
-        Add(g1, Lbl("דוא\"ל"), T(() => s.Email, v => s.Email = v));
-        Add(g1, Lbl("שם השמאי (בחתימה)"), T(() => s.AppraiserName, v => s.AppraiserName = v));
-        Add(g1, Lbl("שורה שנייה בחתימה"), T(() => s.AppraiserSubtitle, v => s.AppraiserSubtitle = v));
+        Add(g1, Lbl("נייד"), T(() => s.Mobile, v => s.Mobile = v));
         Add(g1, Lbl("מספר רישיון שמאי"), T(() => s.LicenseNo, v => s.LicenseNo = v));
+        Add(g1, Lbl("השכלה והכשרה מקצועית"), T(() => s.Education, v => s.Education = v));
+        Add(g1, Lbl("עוסק מורשה מספר"), T(() => s.VatDealerNo, v => s.VatDealerNo = v));
+        Add(g1, Lbl("טקסט בתחתית העמוד"), T(() => s.FooterTag, v => s.FooterTag = v));
         Add(g1, Lbl("הערות ברירת מחדל"), T(() => s.DefaultNotes, v => s.DefaultNotes = v, true, 120));
 
         var sigRow = new FlowLayoutPanel { AutoSize = true };
@@ -617,7 +697,7 @@ public class MainForm : Form
         var save = new System.Windows.Forms.Button { Text = "שמור הגדרות", AutoSize = true, BackColor = Color.FromArgb(247, 201, 72), Font = BoldFont };
         save.Click += (_, _) => { try { Storage.SaveSettings(s); Msg("ההגדרות נשמרו. הן יופיעו בכל חוות דעת שתפיק."); } catch (Exception ex) { Msg(ex.Message, MessageBoxIcon.Error); } };
 
-        root.Controls.Add(Section("פרטי המשרד (כותרת המסמך)"));
+        root.Controls.Add(Section("פרטי המשרד והשמאי (כותרת, הצהרה וחתימה)"));
         root.Controls.Add(g1);
         root.Controls.Add(Section("חתימה"));
         root.Controls.Add(sigRow);

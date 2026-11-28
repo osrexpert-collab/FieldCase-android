@@ -4,354 +4,441 @@ using QuestPDF.Infrastructure;
 
 namespace ShumaDesktop;
 
-/// <summary>Builds the expert-opinion PDF. Pages flow with the content, so there are never empty pages.</summary>
+/// <summary>
+/// Builds the appraisal report in the office layout: damage opinion, optional depreciation opinion,
+/// fee invoice and photos. Content flows across pages, so no page is ever left empty.
+/// </summary>
 public static class PdfBuilder
 {
-    const string Yellow = "#FFF6C4";
-    const string Gray = "#EDEDED";
-    const string Line = "#555555";
     const string Font = "Arial";
+    const string Line = "#333333";
+    const string Soft = "#666666";
 
     public static void Generate(CaseData d, OfficeSettings s, string path)
     {
         Document.Create(doc =>
         {
-            // ---------- the opinion ----------
-            doc.Page(page =>
-            {
-                Setup(page);
-                page.Header().Element(h => Letterhead(h, s));
-                page.Content().PaddingTop(6).Column(col =>
-                {
-                    col.Spacing(7);
-                    Recipient(col, d);
-                    col.Item().PaddingTop(4).AlignCenter().Text(t =>
-                    {
-                        t.Span(d.DocTitle + "  ").Bold().FontSize(16).Underline();
-                        t.Span(d.OpinionNo).Bold().FontSize(16).Underline();
-                    });
-                    col.Item().Background(Yellow).Padding(5).Row(r =>
-                    {
-                        r.RelativeItem().Text("מבלי לפגוע בזכויות").Bold();
-                        r.AutoItem().Text(d.RepairStatus ?? "").Bold();
-                    });
-                    Details(col, d);
-                    col.Item().Background(Yellow).Padding(6).Text(
-                        "בהתאם לבקשתכם בחנתי את נזקי הרכב כפי שהוצגו בפני, והערכתי אותם כמפורט להלן:\n" +
-                        "הערכתי נעשתה מבלי לפגוע בזכויות ומתייחסת לנזקים שהוצגו בפני לפי נסיבות האירוע ובהתאם לגרסת בעל הרכב.");
-                    Heading(col, "נסיבות המקרה:");
-                    col.Item().Background(Yellow).Padding(6).Text(d.Circumstances ?? "");
-                    Heading(col, "פירוט העבודות:");
-                    col.Item().Background(Yellow).Padding(6).Text(
-                        "לבקשתכם בדקנו את נזקי הרכב כפי שהוצגו בפני והערכתי אותם כמפורט להלן לתיקון הרכב.\nהיה צורך בביצוע העבודות הבאות:");
-
-                    for (int i = 0; i < d.Foci.Count; i++) Focus(col, d.Foci[i], i + 1, d.Foci.Count);
-                    Summary(col, d);
-                    RawDamage(col, d);
-                    Depreciation(col, d);
-
-                    if (!string.IsNullOrWhiteSpace(d.Notes))
-                    {
-                        Heading(col, "הערות:");
-                        col.Item().Background(Yellow).Padding(6).Text(d.Notes);
-                    }
-                    Heading(col, "לוט:");
-                    col.Item().Background(Yellow).Padding(6).Text(d.Attachments ?? "");
-                    Signature(col, s, true);
-                });
-                Footer(page);
-            });
-
-            // ---------- fee invoice ----------
+            doc.Page(p => { Setup(p, d, s); p.Content().PaddingTop(10).Column(col => DamageOpinion(col, d, s)); });
+            if (d.IncludeDepreciation)
+                doc.Page(p => { Setup(p, d, s); p.Content().PaddingTop(10).Column(col => DepreciationOpinion(col, d, s)); });
             if (d.IncludeFee)
-            {
-                doc.Page(page =>
-                {
-                    Setup(page);
-                    page.Header().Element(h => Letterhead(h, s));
-                    page.Content().PaddingTop(6).Column(col =>
-                    {
-                        col.Spacing(8);
-                        Recipient(col, d);
-                        col.Item().PaddingTop(4).AlignCenter().Text(t =>
-                        {
-                            t.Span($"חשבון שכ\"ט {d.DocTitle}  ").Bold().FontSize(15).Underline();
-                            t.Span(d.OpinionNo).Bold().FontSize(15).Underline();
-                        });
-                        Details(col, d);
-                        col.Item().PaddingHorizontal(70).Table(t =>
-                        {
-                            t.ColumnsDefinition(c => { c.RelativeColumn(2); c.RelativeColumn(1); });
-                            void R(string label, decimal? v, bool bold = false)
-                            {
-                                var l1 = t.Cell().Element(Cell).Text(label);
-                                var l2 = t.Cell().Element(c => Cell(c).Background(Yellow)).AlignLeft().Text(Num.Money(v, 2));
-                                if (bold) { l1.Bold(); l2.Bold(); }
-                            }
-                            R("שכר טרחה", d.FeeMain); R("צילומים", d.FeePhotos); R("נסיעות", d.FeeTravel);
-                            R("שונות", d.FeeMisc); R("עיגול חשבון שכ\"ט", d.FeeRound);
-                            R("סה\"כ ללא מע\"מ", d.FeeNet);
-                            R($"מע\"מ לפי {Num.Plain(d.FeeVatPercent)}%", d.FeeVat);
-                            R("סה\"כ כולל מע\"מ", d.FeeGross, true);
-                        });
-                        col.Item().PaddingTop(6).Text("חשבון זה אינו מהווה חשבונית מס. חשבונית מס תומצא לאחר קבלת התשלום.");
-                        col.Item().Text("בברכה,");
-                        Signature(col, s, false);
-                    });
-                    Footer(page);
-                });
-            }
-
-            // ---------- photos ----------
+                doc.Page(p => { Setup(p, d, s); p.Content().PaddingTop(10).Column(col => FeeInvoice(col, d, s)); });
             if (d.IncludePhotos && d.Photos.Count > 0)
-            {
-                doc.Page(page =>
-                {
-                    Setup(page);
-                    page.Header().Element(h => Letterhead(h, s));
-                    page.Content().PaddingTop(6).Column(col =>
-                    {
-                        col.Spacing(8);
-                        col.Item().Background(Yellow).Padding(5).AlignCenter().Text("תמונות מקושרות לחוות דעת").Bold().FontSize(12);
-                        col.Item().Table(t =>
-                        {
-                            t.ColumnsDefinition(c => { c.RelativeColumn(); c.RelativeColumn(); });
-                            int n = 0;
-                            foreach (var p in d.Photos)
-                            {
-                                n++;
-                                byte[] bytes;
-                                try { bytes = Convert.FromBase64String(p.JpegBase64); } catch { continue; }
-                                t.Cell().Padding(4).Column(pc =>
-                                {
-                                    pc.Item().Height(190).Border(0.5f).BorderColor(Line).Padding(2).AlignCenter().AlignMiddle().Image(bytes).FitArea();
-                                    pc.Item().PaddingTop(2).Text($"{n}. {p.Caption}").FontSize(9);
-                                });
-                            }
-                            if (n % 2 == 1) t.Cell();
-                        });
-                    });
-                    Footer(page);
-                });
-            }
+                doc.Page(p => { Setup(p, d, s); p.Content().PaddingTop(10).Column(col => Photos(col, d)); });
         }).GeneratePdf(path);
     }
 
-    // ---------- building blocks ----------
+    // ================= documents =================
 
-    static void Setup(PageDescriptor page)
+    static void DamageOpinion(ColumnDescriptor col, CaseData d, OfficeSettings s)
     {
-        page.Size(PageSizes.A4);
-        page.Margin(28);
-        page.ContentFromRightToLeft();
-        page.PageColor(Colors.White);
-        page.DefaultTextStyle(x => x.FontFamily(Font).FontSize(10).FontColor(Colors.Black));
-    }
-
-    static void Footer(PageDescriptor page) =>
-        page.Footer().AlignCenter().Text(t =>
+        col.Spacing(6);
+        Recipient(col, d);
+        col.Item().PaddingTop(6).Row(r =>
         {
-            t.Span("עמוד ").FontSize(8).FontColor(Colors.Grey.Darken1);
-            t.CurrentPageNumber().FontSize(8).FontColor(Colors.Grey.Darken1);
-            t.Span(" מתוך ").FontSize(8).FontColor(Colors.Grey.Darken1);
-            t.TotalPages().FontSize(8).FontColor(Colors.Grey.Darken1);
-        });
-
-    static void Letterhead(IContainer c, OfficeSettings s) =>
-        c.BorderBottom(0.8f).BorderColor(Line).PaddingBottom(5).Column(col =>
-        {
-            col.Item().AlignCenter().Text(s.OfficeTitle ?? "").Bold().FontSize(15);
-            col.Item().AlignCenter().Text($"{s.Address} · נייד: {s.Mobile} · פקס: {s.Fax} · {s.Email}").FontSize(8.5f).FontColor(Colors.Grey.Darken2);
-        });
-
-    static void Recipient(ColumnDescriptor col, CaseData d) =>
-        col.Item().Row(r =>
-        {
-            r.RelativeItem().Column(c =>
-            {
-                c.Item().Text("לכבוד").Bold();
-                if (!string.IsNullOrWhiteSpace(d.ToName)) c.Item().Text(d.ToName);
-                if (!string.IsNullOrWhiteSpace(d.ToAddress)) c.Item().Text(d.ToAddress);
-                c.Item().Text("טל: " + d.ToPhone);
-            });
+            r.RelativeItem().Text(t => { t.Span($"{d.DocTitle}: ").Bold().FontSize(13).Underline(); t.Span(d.OpinionNo ?? "").Bold().FontSize(13).Underline(); });
             r.ConstantItem(170).Column(c =>
             {
-                c.Item().Text(t => { t.Span("תאריך  ").FontColor(Colors.Grey.Darken1); t.Span(d.DocDate); });
-                c.Item().Text(t => { t.Span("תיק  ").FontColor(Colors.Grey.Darken1); t.Span(d.FileNo); });
-                c.Item().Text(t => { t.Span("ע.מ.  ").FontColor(Colors.Grey.Darken1); t.Span(d.VatId); });
+                c.Item().Text(t => { t.Span("תאריך:  "); t.Span(d.DocDate ?? ""); });
+                if (!string.IsNullOrWhiteSpace(d.Status)) c.Item().Text(d.Status).Bold();
             });
         });
 
-    static void Details(ColumnDescriptor col, CaseData d)
-    {
-        var right = new (string, string)[] { ("המזמין/בעל הרכב:", d.Owner), ("תאריך אירוע:", d.EventDate), ("תאריך בדיקה:", d.InspectionDate),
-                                            ("מקום הבדיקה:", d.InspectionPlace), ("בעלויות:", d.Ownership), ("תוצר ודגם:", d.MakeModel) };
-        var left = new (string, string)[] { ("מס' רישוי:", d.LicenseNo), ("מד אוץ:", d.Odometer), ("מס' שילדה:", d.Vin),
-                                           ("שנת יצור:", d.Year), ("סוג רכב:", d.VehicleType), ("סוג חוות דעת:", d.OpinionType) };
-        col.Item().Table(t =>
+        // insurance + vehicle boxes
+        col.Item().PaddingTop(8).Row(r =>
         {
-            t.ColumnsDefinition(c => { c.ConstantColumn(95); c.RelativeColumn(); c.ConstantColumn(85); c.RelativeColumn(); });
-            for (int i = 0; i < 6; i++)
+            r.RelativeItem().BorderLeft(0.8f).BorderColor(Line).PaddingLeft(10).Column(c =>
             {
-                t.Cell().Element(c => Cell(c).Background(Gray)).Text(right[i].Item1).Bold().FontSize(9);
-                t.Cell().Element(Cell).Text(right[i].Item2 ?? "");
-                t.Cell().Element(c => Cell(c).Background(Gray)).Text(left[i].Item1).Bold().FontSize(9);
-                t.Cell().Element(Cell).Text(left[i].Item2 ?? "");
-            }
+                BoxTitle(c, "פרטים ביטוחיים");
+                KV(c, new[]
+                {
+                    ("שם מבוטח:", d.InsuredName), ("מבטח:", d.Insurer), ("שמאי בודק:", d.InspectingAppraiser), ("תאריך אירוע:", d.EventDate),
+                    ("תאריך בדיקה:", Join(d.InspectionDate, string.IsNullOrWhiteSpace(d.InspectionPlace) ? "" : "ב-: " + d.InspectionPlace)),
+                    ("מוסך:", d.Garage), ("סוג תיק:", d.CaseType), ("תאריך רישוי:", d.LicenseDate)
+                });
+            });
+            r.ConstantItem(12);
+            r.RelativeItem().Column(c =>
+            {
+                BoxTitle(c, "פרטי רכב");
+                KV(c, new[]
+                {
+                    ("מספר רישוי:", d.LicenseNo), ("יצרן:", d.Manufacturer), ("דגם:", d.Model), ("שנת יצור:", d.Year), ("קוד דגם:", d.ModelCode),
+                    ("מד אוץ:", string.IsNullOrWhiteSpace(d.Odometer) ? "" : d.Odometer + " (ביום הבדיקה)"), ("מספר שלדה:", d.Vin),
+                    ("מקוריות רכב:", d.Originality), ("סוג רכב:", d.VehicleType), ("מספר בעלים:", d.OwnersCount), ("קוד משרד התחבורה:", d.MotCode)
+                });
+            });
         });
+        Rule(col);
+        col.Item().Column(c => BoxTitle(c, "פרטי בעל הרכב"));
+        KV4(col, new[] { ("שם:", d.OwnerName, "מספר טלפון:", d.OwnerPhone), ("כתובת:", d.OwnerAddress, "מיקוד:", d.OwnerZip) });
+        Rule(col);
+
+        for (int i = 0; i < d.Foci.Count; i++)
+        {
+            var f = d.Foci[i];
+            col.Item().PaddingTop(6).Border(0.8f).BorderColor(Line).PaddingVertical(2).AlignCenter()
+               .Text(string.IsNullOrWhiteSpace(f.Name) ? $"מוקד נזק {i + 1}" : f.Name).Bold();
+            if (i == 0)
+            {
+                Para(col, "מבוא:", d.Intro);
+                Para(col, "נסיבות המקרה:", d.Circumstances);
+                Para(col, "תיאור הנזקים:", d.DamageDescription);
+            }
+            Focus(col, d, f, i);
+        }
+
+        // totals of all foci
+        Rule(col);
+        Totals(col, new[]
+        {
+            ("סה\"כ הוצאות", Num.Shekel(d.Expenses), false),
+            ($"מע\"מ ({Num.Plain(d.VatPercent)}%[{Num.Words(d.VatPercent)}])", Num.Shekel(d.ExpensesVat), false),
+            ("סה\"כ כולל מע\"מ", Num.Shekel(d.ExpensesGross), true)
+        });
+        Rule(col);
+
+        // summary
+        col.Item().PaddingTop(6).Border(0.8f).BorderColor(Line).PaddingVertical(3).AlignCenter().Text("סיכום חוות הדעת").FontSize(14);
+        if (d.ListValue != null)
+        {
+            col.Item().PaddingTop(6).Text("פירוט שווי רכב בפועל").Bold().Underline();
+            col.Item().Table(t =>
+            {
+                t.ColumnsDefinition(c => { c.RelativeColumn(3); c.ConstantColumn(30); c.ConstantColumn(55); c.ConstantColumn(90); c.RelativeColumn(2); });
+                foreach (var h in new[] { "נושא", "-/+", "באחוז", "סכום", "הערות" })
+                    t.Cell().BorderBottom(0.8f).BorderColor(Line).PaddingVertical(2).Text(h).Bold();
+                Row5(t, "ערך רכב מחירון", "", "", Num.Shekel(d.ListValue), "");
+                foreach (var a in d.ValueAdjustments.Where(a => !string.IsNullOrWhiteSpace(a.Subject) || a.Amount != null || a.Percent != null))
+                    Row5(t, a.Subject, a.Sign, a.Percent == null ? "" : Num.Pct(a.Percent), Num.Shekel(Math.Abs(d.AdjustmentAmount(a))), a.Notes);
+                t.Cell().BorderTop(0.8f).BorderColor(Line).PaddingVertical(2).Text("סה\"כ שווי ערך רכב בפועל").Bold();
+                t.Cell().BorderTop(0.8f).BorderColor(Line);
+                t.Cell().BorderTop(0.8f).BorderColor(Line);
+                t.Cell().BorderTop(0.8f).BorderColor(Line).PaddingVertical(2).Text(Num.Shekel(d.ActualValue)).Bold();
+                t.Cell().BorderTop(0.8f).BorderColor(Line);
+            });
+            if (d.RawPercent != null)
+                col.Item().PaddingTop(6).Text($"בהתאם לתחשיב הנ\"ל, אחוז הנזק הגולמי מסתכם בשיעור של {Num.Pct(d.RawPercent)} {(d.RawIncludesVat ? "כולל" : "לא כולל")} מע\"מ.");
+        }
+
+        var notes = (d.Notes ?? "").Split('\n').Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
+        if (notes.Count > 0)
+        {
+            col.Item().PaddingTop(8).Text("הערות:").Bold();
+            foreach (var n in notes) col.Item().Text(n);
+        }
+        if (!string.IsNullOrWhiteSpace(d.Attachments)) Para(col, "לוט:", d.Attachments);
+        Declaration(col, s);
+        SignatureBlock(col, s, "שמאי מאשר");
     }
 
-    static void Focus(ColumnDescriptor col, FocusData f, int n, int count)
+    static void Focus(ColumnDescriptor col, CaseData d, FocusData f, int index)
     {
-        var name = string.IsNullOrWhiteSpace(f.Name) ? "" : " - " + f.Name;
-        if (count > 1) Heading(col, $"מוקד {n}{name}");
-
+        var name = string.IsNullOrWhiteSpace(f.Name) ? $"מוקד {index + 1}" : f.Name;
         var works = f.Works.Where(w => !string.IsNullOrWhiteSpace(w.Description) || w.Cost != null).ToList();
         if (works.Count > 0)
         {
+            SectionBox(col, "עבודות");
             col.Item().Table(t =>
             {
-                t.ColumnsDefinition(c => { c.RelativeColumn(); c.ConstantColumn(110); });
-                t.Header(h =>
-                {
-                    h.Cell().Element(c => Cell(c).Background(Gray)).AlignCenter().Text("תיאור עבודות").Bold();
-                    h.Cell().Element(c => Cell(c).Background(Gray)).AlignCenter().Text("עלות עבודות").Bold();
-                });
+                t.ColumnsDefinition(c => { c.RelativeColumn(); c.ConstantColumn(100); });
+                t.Cell().Text("תיאור עבודה").Bold();
+                t.Cell().Text("עלות עבודה").Bold();
                 foreach (var w in works)
                 {
-                    t.Cell().Element(Cell).Text(w.Description ?? "");
-                    t.Cell().Element(Cell).AlignLeft().Text(Num.Money(w.Cost));
+                    t.Cell().PaddingVertical(1).Text(w.Description ?? "");
+                    t.Cell().PaddingVertical(1).Text(Num.Shekel(w.Cost));
                 }
-                t.Cell().Element(c => Cell(c).Background(Gray)).Text("סה\"כ עבודות").Bold();
-                t.Cell().Element(c => Cell(c).Background(Gray)).AlignLeft().Text(Num.Money(f.WorksTotal)).Bold();
+                t.Cell().Text("סה\"כ עבודות ועבודות נלוות").Bold();
+                t.Cell().BorderTop(0.8f).BorderColor(Line).Text(Num.Shekel(f.WorksTotal)).Bold();
             });
         }
-
+        var paint = f.Paint.Where(w => !string.IsNullOrWhiteSpace(w.Description) || w.Cost != null).ToList();
+        if (paint.Count > 0)
+        {
+            SectionBox(col, "צבע");
+            col.Item().Table(t =>
+            {
+                t.ColumnsDefinition(c => { c.RelativeColumn(); c.ConstantColumn(100); });
+                foreach (var w in paint)
+                {
+                    t.Cell().PaddingVertical(1).Text(w.Description ?? "");
+                    t.Cell().PaddingVertical(1).Text(Num.Shekel(w.Cost));
+                }
+                t.Cell().Text("סה\"כ עבודות צבע").Bold();
+                t.Cell().BorderTop(0.8f).BorderColor(Line).Text(Num.Shekel(f.PaintTotal)).Bold();
+            });
+        }
         var parts = f.Parts.Where(p => !string.IsNullOrWhiteSpace(p.Description) || p.Price != null).ToList();
         if (parts.Count > 0)
         {
+            SectionBox(col, "חלקי חילוף");
             col.Item().Table(t =>
             {
-                t.ColumnsDefinition(c => { c.RelativeColumn(); c.ConstantColumn(95); c.ConstantColumn(95); });
-                t.Header(h =>
-                {
-                    h.Cell().Element(c => Cell(c).Background(Gray)).AlignCenter().Text("תיאור החלק").Bold();
-                    h.Cell().Element(c => Cell(c).Background(Gray)).AlignCenter().Text("סוג החלק").Bold();
-                    h.Cell().Element(c => Cell(c).Background(Gray)).AlignCenter().Text("מחיר החלק").Bold();
-                });
+                t.ColumnsDefinition(c => { c.RelativeColumn(3); c.RelativeColumn(2); c.ConstantColumn(60); c.ConstantColumn(100); });
+                t.Cell().Text("תיאור החלק").Bold();
+                t.Cell().Text("מק\"ט").Bold();
+                t.Cell().Text("סוג החלק").Bold();
+                t.Cell().Text("סה\"כ מחיר").Bold();
                 foreach (var p in parts)
                 {
-                    t.Cell().Element(Cell).Text(p.Description ?? "");
-                    t.Cell().Element(Cell).AlignCenter().Text(p.Type ?? "");
-                    t.Cell().Element(Cell).AlignLeft().Text(Num.Money(p.Price));
+                    t.Cell().PaddingVertical(1).Text(p.Description ?? "");
+                    t.Cell().PaddingVertical(1).Text(p.CatalogNo ?? "");
+                    t.Cell().PaddingVertical(1).Text(p.Type ?? "");
+                    t.Cell().PaddingVertical(1).Text(Num.Shekel(p.Price));
                 }
-                t.Cell().ColumnSpan(2).Element(c => Cell(c).Background(Gray)).Text("סה\"כ חלקים").Bold();
-                t.Cell().Element(c => Cell(c).Background(Gray)).AlignLeft().Text(Num.Money(f.PartsTotal)).Bold();
+                t.Cell().ColumnSpan(3).Text("מחיר חלקי חילוף").Bold();
+                t.Cell().BorderTop(0.8f).BorderColor(Line).Text(Num.Shekel(f.PartsTotal)).Bold();
             });
         }
-    }
-
-    static void Summary(ColumnDescriptor col, CaseData d)
-    {
-        col.Item().PaddingTop(4).Table(t =>
+        Rule(col);
+        Totals(col, new[]
         {
-            t.ColumnsDefinition(c => { c.RelativeColumn(); c.ConstantColumn(120); });
-            foreach (var f in d.Foci)
-            {
-                t.Cell().Element(c => Cell(c).Background(Yellow)).Text(t2 =>
-                {
-                    t2.Span("סה\"כ נזק למוקד ").Bold();
-                    t2.Span(f.Name ?? "").Bold();
-                });
-                t.Cell().Element(Cell).AlignLeft().Text(Num.Money(f.Total)).Bold();
-            }
-            if (d.Foci.Count > 1)
-            {
-                t.Cell().Element(c => Cell(c).Background(Yellow)).Text("סה\"כ נזק (כל המוקדים)").Bold();
-                t.Cell().Element(Cell).AlignLeft().Text(Num.Money(d.DamageTotal)).Bold();
-            }
-            if (d.TotalIncludesVat)
-            {
-                t.Cell().Element(c => Cell(c).Background(Yellow)).Text($"מע\"מ {Num.Plain(d.VatPercent)}%").Bold();
-                t.Cell().Element(Cell).AlignLeft().Text(Num.Money(d.DamageVat, 2));
-            }
-            t.Cell().Element(c => Cell(c).Background(Yellow)).Text(d.TotalIncludesVat ? "סה\"כ כולל מע\"מ" : "סה\"כ לא כולל מע\"מ").Bold();
-            t.Cell().Element(Cell).AlignLeft().Text(Num.Money(d.TotalFinal, d.TotalIncludesVat ? 2 : 0)).Bold();
+            ($"סה\"כ נזק למוקד {name}", Num.Shekel(f.Total), true),
+            ($"סה\"כ מע\"מ למוקד - {name}", Num.Shekel(d.FocusVat(f)), false),
+            ($"סה\"כ נזק כולל מע\"מ למוקד - {name}", Num.Shekel(f.Total + d.FocusVat(f)), true)
         });
     }
 
-    static void RawDamage(ColumnDescriptor col, CaseData d)
+    static void DepreciationOpinion(ColumnDescriptor col, CaseData d, OfficeSettings s)
     {
-        if (d.CarValue == null) return;
-        Heading(col, "תחשיב נזק גולמי");
-        var vat = d.CarValueIncludesVat ? "כולל מע\"מ" : "לא כולל מע\"מ";
-        col.Item().Background(Yellow).Padding(6).Column(c =>
+        col.Spacing(6);
+        Recipient(col, d);
+        col.Item().PaddingTop(6).Row(r =>
         {
-            c.Item().Text($"ערך רכב בסיסי עובר ליום האירוע לפי מחירון לוי יצחק {Num.Money(d.CarValue)} ₪ {vat}" +
-                          (string.IsNullOrWhiteSpace(d.ModelCode) ? "" : $", קוד דגם {d.ModelCode}"));
-            c.Item().Text($"הנזק הגולמי בסך {Num.Money(d.DamageTotal)} ₪ מהווה {Num.Plain(d.RawPercent)}% מערך הרכב. בחישוב נזק גולמי אינם כלולים");
+            r.RelativeItem().Text("חוות דעת - לירידת ערך").Bold().FontSize(13).Underline();
+            r.ConstantItem(170).Text(t => { t.Span("תאריך:  "); t.Span(d.DocDate ?? ""); });
         });
-        col.Item().Text("הוצאות נלוות לתיקון הרכב, שווי הרכב אינו כולל עבר ביטוחי, בעלויות ומד אוץ.");
+        col.Item().Text("א.ג.נ.");
+        Rule(col);
+        col.Item().Text("פרטי מבוטח").Bold().Underline();
+        KV4(col, new[]
+        {
+            ("שם מבוטח:", d.InsuredName, "טלפון:", d.InsuredPhone),
+            ("כתובת:", Join(d.OwnerAddress, string.IsNullOrWhiteSpace(d.OwnerZip) ? "" : "מיקוד " + d.OwnerZip), "", ""),
+            ("המבטחים:", d.Insurer, "הסניף:", d.Branch),
+            ("יצרן:", d.Manufacturer, "", ""),
+            ("דגם:", d.Model, "שנת יצור:", d.Year),
+            ("מספר רישוי:", d.LicenseNo, "מספר שלדה:", d.Vin),
+            ("מד אוץ:", d.Odometer, "תאריך נזק:", d.EventDate)
+        });
+        col.Item().PaddingTop(8).Text($"1.  בתאריך {d.DocDate} אמדנו את שווי ירידת הערך לרכב הנ\"ל בהסתמך על אומדן נזק מספר {d.OpinionNo}");
+        col.Item().Text($"2.  שווי הרכב בפועל: {Num.Shekel(d.ActualValue)}").Bold();
+        col.Item().Text($"3.  אחוז ירידת הערך: {Num.Pct(d.DeprPercent)}     סכום ירידת הערך: {Num.Shekel(d.DeprAmount)}").Bold();
+        col.Item().Text("4.  הסיבות לירידת הערך באופן כללי הם:");
+        if (!string.IsNullOrWhiteSpace(d.DeprReasons)) col.Item().PaddingRight(14).Text(d.DeprReasons);
+        col.Item().PaddingRight(14).Text("ירידת הערך אינה חייבת במע\"מ.");
+        Declaration(col, s);
+        SignatureBlock(col, s, "בכבוד רב");
+        col.Item().PaddingTop(16).Text($"לוטה: העתק אומדן נזק מספר {d.OpinionNo}");
     }
 
-    static void Depreciation(ColumnDescriptor col, CaseData d)
+    static void FeeInvoice(ColumnDescriptor col, CaseData d, OfficeSettings s)
     {
-        var rows = d.Depreciation.Where(r => !string.IsNullOrWhiteSpace(r.Factor) || r.Percent != null).ToList();
-        if (rows.Count == 0 && d.CarValueEvent == null) return;
-        Heading(col, "ירידת ערך");
-        col.Item().Text("נתבקשתי להביע את דעתי לגבי הפחתת הערך שגרמה לרכב הנדון בעקבות האירוע הנדון.");
-        if (!string.IsNullOrWhiteSpace(d.DeprReason)) col.Item().Background(Yellow).Padding(5).Text(d.DeprReason);
-        col.Item().Text("שיעור ירידת ערך ברכב נקבע ע\"פ הגורמים הבאים:");
+        col.Spacing(6);
+        Recipient(col, d);
+        col.Item().PaddingTop(6).Row(r =>
+        {
+            r.RelativeItem().Text("א.ג.נ.");
+            r.ConstantItem(220).Text(t => { t.Span("תאריך אישור שכ\"ט:  "); t.Span(d.FeeDate ?? ""); });
+        });
+        col.Item().PaddingTop(8).AlignCenter().Text($"חשבון שכ\"ט {DocNoun(d.DocTitle)} מספר {d.OpinionNo}").Bold().FontSize(13).Underline();
+        col.Item().PaddingTop(6).Text("פרטי הבדיקה").Bold().Underline();
+        KV4(col, new[]
+        {
+            ("שם השמאי המטפל:", First(d.InspectingAppraiser, s.AppraiserName), "טלפון:", s.Mobile),
+            ("תאריך בדיקה:", d.InspectionDate, "מקום בדיקה:", d.InspectionPlace),
+            ("שם המוסך:", d.Garage, "", "")
+        });
+        col.Item().PaddingTop(6).Text("פרטים ביטוחיים").Bold().Underline();
+        KV4(col, new[]
+        {
+            ("חברת ביטוח:", d.Insurer, "טלפון מבוטח:", d.InsuredPhone),
+            ("שם מבוטח:", d.InsuredName, "בעל רכב:", d.OwnerName),
+            ("מספר פוליסה:", d.PolicyNo, "מספר תביעה:", d.ClaimNo),
+            ("מספר רישוי:", d.LicenseNo, "שנת יצור:", d.Year),
+            ("יצרן:", d.Manufacturer, "דגם:", d.Model),
+            ("תאריך נזק:", d.EventDate, "", ""),
+            ("ת.ז. מבוטח:", d.InsuredId, "", "")
+        });
+        col.Item().PaddingTop(10).Table(t =>
+        {
+            t.ColumnsDefinition(c => { c.ConstantColumn(120); c.ConstantColumn(100); c.RelativeColumn(); });
+            void R(string label, decimal? v, bool bold, bool line)
+            {
+                var a = t.Cell().PaddingVertical(1).Text(label);
+                IContainer cell = line ? t.Cell().BorderTop(0.8f).BorderColor(Line) : t.Cell();
+                var b = cell.PaddingVertical(1).Text(Num.Shekel(v ?? 0));
+                t.Cell();
+                if (bold) { a.Bold(); b.Bold(); }
+            }
+            R("שכר טרחה:", d.FeeMain, false, false);
+            R("צילומים:", d.FeePhotos, false, false);
+            R("נסיעות:", d.FeeTravel, false, false);
+            R("שונות:", d.FeeMisc, false, false);
+            R("סה\"כ ללא מע\"מ:", d.FeeNet, false, true);
+            R($"מע\"מ לפי: ({Num.Plain(d.FeeVatPercent)}%)", d.FeeVat, false, false);
+            R("סה\"כ כולל מע\"מ:", d.FeeGross, true, true);
+            t.Cell().PaddingTop(4).Text("עוסק מורשה מספר:");
+            t.Cell().PaddingTop(4).Text(s.VatDealerNo ?? "");
+            t.Cell().PaddingTop(4).Text("(מסמך זה אינו מהווה אסמכתה לשלטונות המס)").FontSize(9);
+        });
+        col.Item().PaddingTop(18).AlignLeft().Width(200).Column(c =>
+        {
+            c.Item().Text("בכבוד רב  " + (s.AppraiserName ?? ""));
+            if (!string.IsNullOrWhiteSpace(s.LicenseNo)) c.Item().Text("רישיון " + s.LicenseNo);
+            Signature(c, s);
+        });
+    }
+
+    static void Photos(ColumnDescriptor col, CaseData d)
+    {
+        col.Spacing(8);
+        col.Item().Border(0.8f).BorderColor(Line).PaddingVertical(2).AlignCenter().Text("תמונות קשורות לחוות דעת").Bold();
         col.Item().Table(t =>
         {
-            t.ColumnsDefinition(c => { c.RelativeColumn(); c.ConstantColumn(90); });
-            t.Header(h =>
+            t.ColumnsDefinition(c => { c.RelativeColumn(); c.RelativeColumn(); });
+            int n = 0;
+            foreach (var p in d.Photos)
             {
-                h.Cell().Element(c => Cell(c).Background(Gray)).AlignCenter().Text("גורם ירידת הערך").Bold();
-                h.Cell().Element(c => Cell(c).Background(Gray)).AlignCenter().Text("אחוז").Bold();
-            });
-            foreach (var r in rows)
-            {
-                t.Cell().Element(Cell).Text(r.Factor ?? "");
-                t.Cell().Element(Cell).AlignCenter().Text(Num.Plain(r.Percent) + (r.Percent != null ? "%" : ""));
-            }
-            t.Cell().Element(c => Cell(c).Background(Gray)).Text("סה\"כ למוקד (%)").Bold();
-            t.Cell().Element(c => Cell(c).Background(Gray)).AlignCenter().Text(Num.Plain(d.DeprPercentTotal) + "%").Bold();
-        });
-        var vat = d.CarValueEventIncludesVat ? "כולל מע\"מ" : "לא כולל מע\"מ";
-        col.Item().Background(Yellow).Padding(5).Column(c =>
-        {
-            c.Item().Text($"ערך הרכב משוערך ליום האירוע הינו {Num.Money(d.CarValueEvent)} ₪ {vat}").Bold();
-            c.Item().Text($"לפיכך סה\"כ ירידת הערך {Num.Money(d.DeprTotal)} ₪").Bold();
-        });
-    }
-
-    static void Signature(ColumnDescriptor col, OfficeSettings s, bool withLicense)
-    {
-        col.Item().PaddingTop(18).Row(r =>
-        {
-            r.RelativeItem().Column(c =>
-            {
-                c.Item().Text(s.AppraiserName ?? "");
-                c.Item().Text(s.AppraiserSubtitle ?? "");
-                if (withLicense && !string.IsNullOrWhiteSpace(s.LicenseNo)) c.Item().Text("שמאי רכב מס' " + s.LicenseNo);
-            });
-            r.ConstantItem(170).Column(c =>
-            {
-                if (!string.IsNullOrWhiteSpace(s.SignaturePngBase64))
+                byte[] bytes;
+                try { bytes = Convert.FromBase64String(p.JpegBase64); } catch { continue; }
+                n++;
+                var num = n;
+                t.Cell().Padding(4).Column(pc =>
                 {
-                    try { c.Item().Height(50).AlignCenter().Image(Convert.FromBase64String(s.SignaturePngBase64)).FitArea(); }
-                    catch { c.Item().Height(50); }
-                }
-                else c.Item().Height(40);
-                c.Item().BorderTop(0.8f).BorderColor(Colors.Black).AlignCenter().Text("חתימה").FontSize(8.5f);
-            });
+                    pc.Item().Height(200).Border(0.5f).BorderColor(Soft).Padding(2).AlignCenter().AlignMiddle().Image(bytes).FitArea();
+                    pc.Item().PaddingTop(2).Text($"{num}. {p.Caption}").FontSize(9);
+                });
+            }
+            if (n % 2 == 1) t.Cell();
         });
     }
 
-    static void Heading(ColumnDescriptor col, string text) =>
-        col.Item().PaddingTop(4).Text(text).Bold().FontSize(11);
+    // ================= building blocks =================
 
-    static IContainer Cell(IContainer c) =>
-        c.Border(0.6f).BorderColor(Line).PaddingVertical(3).PaddingHorizontal(4);
+    static void Setup(PageDescriptor page, CaseData d, OfficeSettings s)
+    {
+        page.Size(PageSizes.A4);
+        page.MarginHorizontal(40);
+        page.MarginVertical(26);
+        page.ContentFromRightToLeft();
+        page.PageColor(Colors.White);
+        page.DefaultTextStyle(x => x.FontFamily(Font).FontSize(10).FontColor(Colors.Black));
+        page.Header().BorderBottom(0.8f).BorderColor(Line).PaddingBottom(6).Column(c =>
+        {
+            c.Item().AlignCenter().Text(s.OfficeName ?? "").Bold().FontSize(12);
+            if (!string.IsNullOrWhiteSpace(s.AppraiserName)) c.Item().AlignCenter().Text(s.AppraiserName);
+            if (!string.IsNullOrWhiteSpace(s.Address)) c.Item().AlignCenter().Text(s.Address);
+            var contact = string.Join("  -  ", new[] { s.Email, Prefix("פקס ", s.Fax), Prefix("נייד ", s.Mobile) }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            c.Item().AlignCenter().Text(contact).FontSize(9);
+        });
+        page.Footer().BorderTop(0.6f).BorderColor(Line).PaddingTop(3).Text(t =>
+        {
+            t.Span($"{s.FooterTag} — {d.LicenseNo}").Bold().FontSize(7.5f).FontColor(Soft);
+            t.Span($"        תאריך הדפסה: {DateTime.Today:dd/MM/yyyy}        עמוד: ").FontSize(7.5f).FontColor(Soft);
+            t.CurrentPageNumber().FontSize(7.5f).FontColor(Soft);
+        });
+    }
+
+    static void Recipient(ColumnDescriptor col, CaseData d) =>
+        col.Item().Column(c =>
+        {
+            c.Item().Text("לכבוד: " + (d.ToName ?? ""));
+            var addr = Join(d.ToAddress, string.IsNullOrWhiteSpace(d.ToZip) ? "" : "מיקוד: " + d.ToZip);
+            if (addr.Length > 0) c.Item().Text(addr);
+        });
+
+    static void BoxTitle(ColumnDescriptor c, string text) =>
+        c.Item().PaddingBottom(6).AlignRight().Border(0.8f).BorderColor(Line).PaddingHorizontal(10).PaddingVertical(1).Text(text).FontSize(13);
+
+    static void SectionBox(ColumnDescriptor col, string text) =>
+        col.Item().PaddingTop(8).AlignRight().MinWidth(110).Border(0.8f).BorderColor(Line).PaddingHorizontal(8).PaddingVertical(1).Text(text).FontSize(13);
+
+    static void KV(ColumnDescriptor c, (string, string)[] rows) =>
+        c.Item().Table(t =>
+        {
+            t.ColumnsDefinition(x => { x.ConstantColumn(92); x.RelativeColumn(); });
+            foreach (var (k, v) in rows)
+            {
+                t.Cell().PaddingVertical(1).Text(k).FontColor(Soft);
+                t.Cell().PaddingVertical(1).Text(v ?? "");
+            }
+        });
+
+    static void KV4(ColumnDescriptor col, (string, string, string, string)[] rows) =>
+        col.Item().Table(t =>
+        {
+            t.ColumnsDefinition(x => { x.ConstantColumn(95); x.RelativeColumn(); x.ConstantColumn(85); x.RelativeColumn(); });
+            foreach (var (k1, v1, k2, v2) in rows)
+            {
+                t.Cell().PaddingVertical(1).Text(k1).FontColor(Soft);
+                t.Cell().PaddingVertical(1).Text(v1 ?? "");
+                t.Cell().PaddingVertical(1).Text(k2).FontColor(Soft);
+                t.Cell().PaddingVertical(1).Text(v2 ?? "");
+            }
+        });
+
+    static void Totals(ColumnDescriptor col, (string, string, bool)[] rows) =>
+        col.Item().Table(t =>
+        {
+            t.ColumnsDefinition(c => { c.RelativeColumn(); c.ConstantColumn(100); });
+            foreach (var (label, value, bold) in rows)
+            {
+                var a = t.Cell().PaddingVertical(1).Text(label);
+                var b = t.Cell().PaddingVertical(1).Text(value);
+                if (bold) { a.Bold(); b.Bold(); }
+            }
+        });
+
+    static void Row5(TableDescriptor t, string a, string b, string c, string d, string e)
+    {
+        t.Cell().PaddingVertical(1).Text(a ?? "");
+        t.Cell().PaddingVertical(1).AlignCenter().Text(b ?? "");
+        t.Cell().PaddingVertical(1).Text(c ?? "");
+        t.Cell().PaddingVertical(1).Text(d ?? "");
+        t.Cell().PaddingVertical(1).Text(e ?? "").FontSize(9);
+    }
+
+    static void Para(ColumnDescriptor col, string title, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        col.Item().PaddingTop(4).Text(title).Bold();
+        col.Item().Text(text);
+    }
+
+    static void Rule(ColumnDescriptor col) => col.Item().PaddingVertical(4).LineHorizontal(0.8f).LineColor(Line);
+
+    static void Declaration(ColumnDescriptor col, OfficeSettings s)
+    {
+        col.Item().PaddingTop(12).Text("אני הח\"מ: " + string.Join(", ", new[] { s.AppraiserName, s.Education }.Where(x => !string.IsNullOrWhiteSpace(x))));
+        col.Item().Text("עוסק בשמאות רכב, תעודת שמאי מספר " + s.LicenseNo);
+        col.Item().Text("נותן על פי בקשתך/כם חוות דעתי במקום עדות בשבועה בבית משפט. הנני מצהיר כי ידוע לי היטב על פי הוראות החוק הפלילי בדבר מתן עדות שקר בבית משפט, דין חוות דעת זו כשהיא חתומה על ידי, כדין עדות בשבועה בבית משפט.");
+    }
+
+    static void SignatureBlock(ColumnDescriptor col, OfficeSettings s, string title) =>
+        col.Item().PaddingTop(14).AlignLeft().Width(200).Column(c =>
+        {
+            c.Item().Text(title).Bold();
+            c.Item().Text(s.AppraiserName ?? "");
+            c.Item().Text("רישיון מספר " + s.LicenseNo);
+            Signature(c, s);
+        });
+
+    static void Signature(ColumnDescriptor c, OfficeSettings s)
+    {
+        if (string.IsNullOrWhiteSpace(s.SignaturePngBase64)) return;
+        byte[] img;
+        try { img = Convert.FromBase64String(s.SignaturePngBase64); } catch { return; }
+        c.Item().PaddingTop(4).Height(50).AlignRight().Image(img).FitHeight();
+    }
+
+    static string Prefix(string p, string v) => string.IsNullOrWhiteSpace(v) ? "" : p + v;
+
+    static string Join(string a, string b) =>
+        string.Join(" ", new[] { a, b }.Where(x => !string.IsNullOrWhiteSpace(x))).Trim();
+
+    static string First(string a, string b) => string.IsNullOrWhiteSpace(a) ? b ?? "" : a;
+
+    static string DocNoun(string title) => title == "חוות דעת" ? "חוות דעתנו" : title;
 }
