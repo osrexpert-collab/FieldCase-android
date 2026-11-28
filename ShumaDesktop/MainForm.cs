@@ -533,6 +533,7 @@ public class MainForm : Form
         parts.Columns.Add(MoneyColumn(nameof(PartRow.Price), "סה\"כ מחיר"));
         parts.DataSource = f.Parts;
         HookGrid(parts);
+        RowTools(parts, f.Parts, o => o is PartRow r && (!string.IsNullOrWhiteSpace(r.Description) || !string.IsNullOrWhiteSpace(r.CatalogNo) || r.Price != null) ? (r.Description ?? "") : null);
 
         var wTot = TotalLabel(); var pnTot = TotalLabel(); var pTot = TotalLabel();
         var fTot = new Label { AutoSize = true, Font = new Font("Segoe UI", 11f, FontStyle.Bold), ForeColor = Color.FromArgb(0, 0, 115), Padding = new Padding(0, 6, 0, 0) };
@@ -575,7 +576,52 @@ public class MainForm : Form
         g.Columns.Add(MoneyColumn(nameof(CostRow.Cost), costHeader));
         g.DataSource = rows;
         HookGrid(g);
+        RowTools(g, rows, o => o is CostRow r && (!string.IsNullOrWhiteSpace(r.Description) || r.Cost != null) ? (r.Description ?? "") : null);
         return g;
+    }
+
+    /// <summary>Delete key (when not typing in a cell) and a right-click menu that delete or add rows.
+    /// describe returns null for an empty row, otherwise a short text for the confirmation.</summary>
+    void RowTools(DataGridView g, System.Collections.IList list, Func<object, string> describe)
+    {
+        g.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
+        void Delete(int i)
+        {
+            g.EndEdit();
+            if (i < 0 || i >= list.Count) return;   // the empty "new row" at the bottom
+            var d = describe(list[i]);
+            if (d != null && MessageBox.Show(this, $"למחוק את שורה {i + 1}" + (d.Length > 0 ? $" (\"{d}\")" : "") + "?", Text,
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2, MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign) != DialogResult.Yes) return;
+            list.RemoveAt(i);
+            g.Refresh(); Changed();
+        }
+        g.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Delete && !g.IsCurrentCellInEditMode && g.CurrentRow != null)
+            { e.Handled = true; Delete(g.CurrentRow.Index); }
+        };
+        g.UserDeletingRow += (_, e) => e.Cancel = true;   // handled above, with confirmation
+        var menu = new ContextMenuStrip { RightToLeft = RightToLeft.Yes };
+        var miDel = new ToolStripMenuItem("מחק שורה", null, (_, _) => Delete(g.CurrentRow?.Index ?? -1)) { ShortcutKeyDisplayString = "Delete" };
+        var miAdd = new ToolStripMenuItem("הוסף שורה", null, (_, _) =>
+        {
+            g.EndEdit();
+            if (g.NewRowIndex >= 0) { g.CurrentCell = g.Rows[g.NewRowIndex].Cells[0]; g.BeginEdit(true); }
+        });
+        menu.Items.Add(miDel); menu.Items.Add(miAdd);
+        menu.Opening += (_, e) =>
+        {
+            int i = g.CurrentRow?.Index ?? -1;
+            miDel.Enabled = i >= 0 && i < list.Count;
+            miDel.Text = miDel.Enabled ? $"מחק שורה {i + 1}" : "מחק שורה";
+        };
+        g.CellMouseDown += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Right || e.RowIndex < 0) return;
+            g.EndEdit();
+            g.CurrentCell = g.Rows[e.RowIndex].Cells[Math.Max(0, e.ColumnIndex)];
+        };
+        g.ContextMenuStrip = menu;
     }
 
     void HookGrid(DataGridView g)
