@@ -77,7 +77,7 @@ public static class PdfBuilder
         for (int i = 0; i < d.Foci.Count; i++)
         {
             var f = d.Foci[i];
-            col.Item().PaddingTop(6).Border(0.8f).BorderColor(Line).PaddingVertical(2).AlignCenter()
+            col.Item().EnsureSpace(120).PaddingTop(6).Border(0.8f).BorderColor(Line).PaddingVertical(2).AlignCenter()
                .Text(string.IsNullOrWhiteSpace(f.Name) ? $"מוקד נזק {i + 1}" : f.Name).Bold();
             if (i == 0)
             {
@@ -142,8 +142,7 @@ public static class PdfBuilder
             col.Item().Table(t =>
             {
                 t.ColumnsDefinition(c => { c.RelativeColumn(); c.ConstantColumn(100); });
-                t.Cell().Text("תיאור עבודה").Bold();
-                t.Cell().Text("עלות עבודה").Bold();
+                t.Header(h => { h.Cell().Text("תיאור עבודה").Bold(); h.Cell().Text("עלות עבודה").Bold(); });
                 foreach (var w in works)
                 {
                     t.Cell().PaddingVertical(1).Text(w.Description ?? "");
@@ -176,14 +175,17 @@ public static class PdfBuilder
             col.Item().Table(t =>
             {
                 t.ColumnsDefinition(c => { c.RelativeColumn(3); c.RelativeColumn(2); c.ConstantColumn(60); c.ConstantColumn(100); });
-                t.Cell().Text("תיאור החלק").Bold();
-                t.Cell().Text("מק\"ט").Bold();
-                t.Cell().Text("סוג החלק").Bold();
-                t.Cell().Text("סה\"כ מחיר").Bold();
+                t.Header(h =>
+                {
+                    h.Cell().Text("תיאור החלק").Bold();
+                    h.Cell().Text("מק\"ט").Bold();
+                    h.Cell().Text("סוג החלק").Bold();
+                    h.Cell().Text("סה\"כ מחיר").Bold();
+                });
                 foreach (var p in parts)
                 {
                     t.Cell().PaddingVertical(1).Text(p.Description ?? "");
-                    t.Cell().PaddingVertical(1).Text(p.CatalogNo ?? "");
+                    Val(t.Cell().PaddingVertical(1), p.CatalogNo);
                     t.Cell().PaddingVertical(1).Text(p.Type ?? "");
                     t.Cell().PaddingVertical(1).Text(Num.Shekel(p.Price));
                 }
@@ -336,7 +338,7 @@ public static class PdfBuilder
         page.Footer().BorderTop(0.6f).BorderColor(Line).PaddingTop(3).Text(t =>
         {
             t.Span($"{s.FooterTag} — {d.LicenseNo}").Bold().FontSize(7.5f).FontColor(Soft);
-            t.Span($"        תאריך הדפסה: {DateTime.Today:dd/MM/yyyy}        עמוד: ").FontSize(7.5f).FontColor(Soft);
+            t.Span($"        תאריך הדפסה: {DateTime.Today.ToString("dd/MM/yyyy", System.Globalization.CultureInfo.InvariantCulture)}        עמוד: ").FontSize(7.5f).FontColor(Soft);
             t.CurrentPageNumber().FontSize(7.5f).FontColor(Soft);
         });
     }
@@ -353,7 +355,7 @@ public static class PdfBuilder
         c.Item().PaddingBottom(6).AlignRight().Border(0.8f).BorderColor(Line).PaddingHorizontal(10).PaddingVertical(1).Text(text).FontSize(13);
 
     static void SectionBox(ColumnDescriptor col, string text) =>
-        col.Item().PaddingTop(8).AlignRight().MinWidth(110).Border(0.8f).BorderColor(Line).PaddingHorizontal(8).PaddingVertical(1).Text(text).FontSize(13);
+        col.Item().EnsureSpace(90).PaddingTop(8).AlignRight().MinWidth(110).Border(0.8f).BorderColor(Line).PaddingHorizontal(8).PaddingVertical(1).Text(text).FontSize(13);
 
     static void KV(ColumnDescriptor c, (string, string)[] rows) =>
         c.Item().Table(t =>
@@ -362,7 +364,7 @@ public static class PdfBuilder
             foreach (var (k, v) in rows)
             {
                 t.Cell().PaddingVertical(1).Text(k).FontColor(Soft);
-                t.Cell().PaddingVertical(1).Text(v ?? "");
+                Val(t.Cell().PaddingVertical(1), v);
             }
         });
 
@@ -373,14 +375,14 @@ public static class PdfBuilder
             foreach (var (k1, v1, k2, v2) in rows)
             {
                 t.Cell().PaddingVertical(1).Text(k1).FontColor(Soft);
-                t.Cell().PaddingVertical(1).Text(v1 ?? "");
+                Val(t.Cell().PaddingVertical(1), v1);
                 t.Cell().PaddingVertical(1).Text(k2).FontColor(Soft);
-                t.Cell().PaddingVertical(1).Text(v2 ?? "");
+                Val(t.Cell().PaddingVertical(1), v2);
             }
         });
 
     static void Totals(ColumnDescriptor col, (string, string, bool)[] rows) =>
-        col.Item().Table(t =>
+        col.Item().ShowEntire().Table(t =>
         {
             t.ColumnsDefinition(c => { c.RelativeColumn(); c.ConstantColumn(100); });
             foreach (var (label, value, bold) in rows)
@@ -432,6 +434,12 @@ public static class PdfBuilder
         try { img = Convert.FromBase64String(s.SignaturePngBase64); } catch { return; }
         c.Item().PaddingTop(4).Height(50).AlignRight().Image(img).FitHeight();
     }
+
+    static bool IsLtr(string v) => !string.IsNullOrEmpty(v) && v.Any(ch => ch < 128 && char.IsLetter(ch)) && !v.Any(ch => ch >= '\u0590' && ch <= '\u05FF');
+
+    /// <summary>Writes a value; codes such as catalog numbers keep their left-to-right order.</summary>
+    static TextBlockDescriptor Val(IContainer c, string v) =>
+        IsLtr(v) ? c.AlignRight().ContentFromLeftToRight().Text(v) : c.Text(v ?? "");
 
     static string Prefix(string p, string v) => string.IsNullOrWhiteSpace(v) ? "" : p + v;
 

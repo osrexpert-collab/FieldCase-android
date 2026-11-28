@@ -52,7 +52,7 @@ public class CaseData
     // document
     public string DocTitle { get; set; } = "חוות דעת";
     public string OpinionNo { get; set; } = "";
-    public string DocDate { get; set; } = DateTime.Today.ToString("dd/MM/yyyy");
+    public string DocDate { get; set; } = DateTime.Today.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
     public string Status { get; set; } = "";
     public string ToName { get; set; } = "";
     public string ToAddress { get; set; } = "";
@@ -63,7 +63,7 @@ public class CaseData
     public string Insurer { get; set; } = "";
     public string InspectingAppraiser { get; set; } = "";
     public string EventDate { get; set; } = "";
-    public string InspectionDate { get; set; } = DateTime.Today.ToString("dd/MM/yyyy");
+    public string InspectionDate { get; set; } = DateTime.Today.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
     public string InspectionPlace { get; set; } = "";
     public string Garage { get; set; } = "";
     public string CaseType { get; set; } = "פרטי";
@@ -117,7 +117,7 @@ public class CaseData
 
     // fee invoice
     public bool IncludeFee { get; set; } = true;
-    public string FeeDate { get; set; } = DateTime.Today.ToString("dd/MM/yyyy");
+    public string FeeDate { get; set; } = DateTime.Today.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
     public decimal? FeeMain { get; set; }
     public decimal? FeePhotos { get; set; }
     public decimal? FeeTravel { get; set; }
