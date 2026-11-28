@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -21,6 +24,24 @@ jobs:
           dotnet publish ShumaDesktop/ShumaDesktop.csproj -c Release -r win-x64
           --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
           -p:Version=${{ env.APP_VERSION }} -o publish
+
+      - name: Render a sample report (layout check)
+        shell: pwsh
+        run: |
+          Start-Process -FilePath publish\ShumaDesktop.exe -ArgumentList "--sample","sample-report.pdf" -Wait -NoNewWindow
+          if (-not (Test-Path sample-report.pdf)) { Write-Error "sample PDF was not created"; exit 1 }
+
+      - name: Publish the sample PDF to the preview branch
+        shell: pwsh
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@github.com"
+          git fetch origin shuma-desktop-preview 2>$null
+          git switch --orphan preview-tmp
+          git rm -rq --cached . 2>$null
+          git add -f sample-report.pdf
+          git commit -m "sample report ${{ github.sha }}"
+          git push -f origin HEAD:shuma-desktop-preview
+          git switch -f ${{ github.ref_name }}
 
       - name: Build installer (Inno Setup)
         shell: pwsh

@@ -10,6 +10,11 @@ internal static class Program
         CultureInfo.DefaultThreadCurrentCulture = new CultureInfo("he-IL");
         CultureInfo.DefaultThreadCurrentUICulture = new CultureInfo("he-IL");
         QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+        if (args.Length == 2 && args[0] == "--sample")
+        {
+            PdfBuilder.Generate(Sample.Case(), Sample.Settings(), args[1]);
+            return;
+        }
         ApplicationConfiguration.Initialize();
         var form = new MainForm();
         if (args.Length > 0 && File.Exists(args[0])) form.OpenCase(args[0]);
