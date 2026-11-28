@@ -163,6 +163,8 @@ public class OfficeSettings
     public string FooterTag { get; set; } = "חוות דעת";
     public bool ShowLogoInReport { get; set; } = false;
     public string SignaturePngBase64 { get; set; } = "";
+    /// <summary>Folder for saved cases and PDFs. Empty = the folder chosen during setup.</summary>
+    public string ArchiveDir { get; set; } = "";
     public string DefaultNotes { get; set; } =
         "חוות דעתנו בוצעה בטרם בוצעו התיקונים בפועל ואינה כוללת את הנזקים הסמויים בשלב זה של הבדיקה.\r\n" +
         "לא ידוע לנו עברו הביטוחי של הרכב ותאונות קודמות.\r\n" +
@@ -183,6 +185,20 @@ public static class Storage
             Directory.CreateDirectory(d);
             return d;
         }
+    }
+
+    /// <summary>Archive folder: from settings, else the one chosen in setup (registry), else Documents\Archive Doh. Created if missing.</summary>
+    public static string ArchiveDir(OfficeSettings s)
+    {
+        string? d = string.IsNullOrWhiteSpace(s.ArchiveDir) ? null : s.ArchiveDir;
+        if (d == null && OperatingSystem.IsWindows())
+        {
+            try { d = Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\ShumaDesktop", "ArchiveDir", null) as string; } catch { }
+        }
+        if (string.IsNullOrWhiteSpace(d))
+            d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Archive Doh");
+        try { Directory.CreateDirectory(d); } catch { }
+        return d;
     }
 
     public static OfficeSettings LoadSettings()

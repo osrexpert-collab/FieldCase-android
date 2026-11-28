@@ -31,6 +31,14 @@ ChangesAssociations=yes
 Name: "hebrew"; MessagesFile: "compiler:Languages\Hebrew.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[CustomMessages]
+hebrew.ArcTitle=תיקיית ארכיון לחוות הדעת
+hebrew.ArcSub=היכן לשמור את התיקים ואת קובצי ה-PDF?
+hebrew.ArcText=התוכנה תשמור את חוות הדעת בתיקייה "Archive Doh". ברירת המחדל היא בתיקיית המסמכים בכונן C. כדי לבחור מקום אחר לחץ "עיון".
+english.ArcTitle=Reports archive folder
+english.ArcSub=Where should cases and PDF reports be saved?
+english.ArcText=The program saves reports in the "Archive Doh" folder. By default it is in Documents on drive C. Click Browse to choose another place.
+
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
@@ -42,7 +50,11 @@ Name: "{group}\{#AppName}"; Filename: "{app}\ShumaDesktop.exe"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\ShumaDesktop.exe"; Tasks: desktopicon
 
+[Dirs]
+Name: "{code:GetArchiveDir}"; Flags: uninsneveruninstall
+
 [Registry]
+Root: HKCU; Subkey: "Software\ShumaDesktop"; ValueType: string; ValueName: "ArchiveDir"; ValueData: "{code:GetArchiveDir}"; Flags: uninsdeletevalue
 Root: HKA; Subkey: "Software\Classes\.shuma"; ValueType: string; ValueName: ""; ValueData: "ShumaDesktop.Case"; Flags: uninsdeletevalue
 Root: HKA; Subkey: "Software\Classes\ShumaDesktop.Case"; ValueType: string; ValueName: ""; ValueData: "תיק שמאות"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\ShumaDesktop.Case\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\ShumaDesktop.exe,0"
@@ -50,3 +62,25 @@ Root: HKA; Subkey: "Software\Classes\ShumaDesktop.Case\shell\open\command"; Valu
 
 [Run]
 Filename: "{app}\ShumaDesktop.exe"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+var
+  ArchivePage: TInputDirWizardPage;
+
+procedure InitializeWizard;
+begin
+  ArchivePage := CreateInputDirPage(wpSelectDir, CustomMessage('ArcTitle'), CustomMessage('ArcSub'),
+    CustomMessage('ArcText'), False, 'Archive Doh');
+  ArchivePage.Add('');
+  ArchivePage.Values[0] := GetPreviousData('ArchiveDir', ExpandConstant('{userdocs}\Archive Doh'));
+end;
+
+procedure RegisterPreviousData(PreviousDataKey: Integer);
+begin
+  SetPreviousData(PreviousDataKey, 'ArchiveDir', ArchivePage.Values[0]);
+end;
+
+function GetArchiveDir(Param: String): String;
+begin
+  Result := ArchivePage.Values[0];
+end;

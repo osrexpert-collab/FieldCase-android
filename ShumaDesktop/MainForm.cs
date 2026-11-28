@@ -84,7 +84,7 @@ public class MainForm : Form
     void OpenDialog()
     {
         if (!ConfirmDiscard()) return;
-        using var d = new OpenFileDialog { Filter = "תיק שמאות (*.shuma)|*.shuma|כל הקבצים|*.*" };
+        using var d = new OpenFileDialog { Filter = "תיק שמאות (*.shuma)|*.shuma|כל הקבצים|*.*", InitialDirectory = Storage.ArchiveDir(settings) };
         if (d.ShowDialog(this) == DialogResult.OK) OpenCase(d.FileName);
     }
 
@@ -104,7 +104,7 @@ public class MainForm : Form
         Validate();
         if (asNew || currentPath == null)
         {
-            using var d = new SaveFileDialog { Filter = "תיק שמאות (*.shuma)|*.shuma", FileName = SafeName($"{data.DocTitle} {data.OpinionNo} {data.LicenseNo}") };
+            using var d = new SaveFileDialog { Filter = "תיק שמאות (*.shuma)|*.shuma", InitialDirectory = currentPath != null ? Path.GetDirectoryName(currentPath) : Storage.ArchiveDir(settings), FileName = SafeName($"{data.DocTitle} {data.OpinionNo} {data.LicenseNo}") };
             if (d.ShowDialog(this) != DialogResult.OK) return false;
             currentPath = d.FileName;
         }
@@ -125,7 +125,7 @@ public class MainForm : Form
     void MakePdf()
     {
         Validate();
-        using var d = new SaveFileDialog { Filter = "PDF (*.pdf)|*.pdf", FileName = SafeName($"{data.DocTitle} {data.OpinionNo} {data.LicenseNo}") + ".pdf" };
+        using var d = new SaveFileDialog { Filter = "PDF (*.pdf)|*.pdf", InitialDirectory = currentPath != null ? Path.GetDirectoryName(currentPath) : Storage.ArchiveDir(settings), FileName = SafeName($"{data.DocTitle} {data.OpinionNo} {data.LicenseNo}") + ".pdf" };
         if (d.ShowDialog(this) != DialogResult.OK) return;
         try
         {
@@ -848,6 +848,19 @@ public class MainForm : Form
         Add(g1, Lbl("לוגו"), logoChk);
         Add(g1, Lbl("הערות ברירת מחדל"), T(() => s.DefaultNotes, v => s.DefaultNotes = v, true, 120));
 
+        var arcRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+        var arcBox = new TextBox { Width = 560, ReadOnly = true, Text = Storage.ArchiveDir(s), RightToLeft = RightToLeft.No };
+        var arcPick = new System.Windows.Forms.Button { Text = "שנה תיקייה…", AutoSize = true };
+        var arcOpen = new System.Windows.Forms.Button { Text = "פתח תיקייה", AutoSize = true };
+        arcPick.Click += (_, _) =>
+        {
+            using var d = new FolderBrowserDialog { Description = "בחר את תיקיית הארכיון לחוות הדעת", InitialDirectory = arcBox.Text, UseDescriptionForTitle = true };
+            if (d.ShowDialog(this) != DialogResult.OK) return;
+            s.ArchiveDir = d.SelectedPath; arcBox.Text = Storage.ArchiveDir(s);
+        };
+        arcOpen.Click += (_, _) => { try { Process.Start(new ProcessStartInfo(Storage.ArchiveDir(s)) { UseShellExecute = true }); } catch (Exception ex) { Msg(ex.Message, MessageBoxIcon.Warning); } };
+        arcRow.Controls.AddRange(new Control[] { arcBox, arcPick, arcOpen });
+
         var sigRow = new FlowLayoutPanel { AutoSize = true };
         var sigPic = new PictureBox { Width = 260, Height = 90, SizeMode = PictureBoxSizeMode.Zoom, BorderStyle = BorderStyle.FixedSingle, BackColor = Color.White };
         void ShowSig() { sigPic.Image?.Dispose(); sigPic.Image = null; try { if (!string.IsNullOrEmpty(s.SignaturePngBase64)) sigPic.Image = Image.FromStream(new MemoryStream(Convert.FromBase64String(s.SignaturePngBase64))); } catch { } }
@@ -869,6 +882,8 @@ public class MainForm : Form
 
         root.Controls.Add(Section("פרטי המשרד והשמאי (כותרת, הצהרה וחתימה)"));
         root.Controls.Add(g1);
+        root.Controls.Add(Section("תיקיית ארכיון (שמירת תיקים ו-PDF)"));
+        root.Controls.Add(arcRow);
         root.Controls.Add(Section("חתימה"));
         root.Controls.Add(sigRow);
         root.Controls.Add(Lbl("מומלץ: חתימה על דף לבן, צילום או סריקה, ושמירה כקובץ PNG."));
