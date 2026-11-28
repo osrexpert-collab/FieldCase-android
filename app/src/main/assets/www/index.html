@@ -44,6 +44,11 @@ button:disabled{opacity:.5}
 .rhead{font-size:12px;color:var(--muted);font-weight:700}
 @media (max-width:560px){.rrow{grid-template-columns:22px 1fr 96px 34px}.rrow .part{grid-column:2/5}.rdel{grid-column:4;grid-row:1}}
 .logos{display:flex;gap:16px;flex-wrap:wrap}
+.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.ph{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--field);display:grid}
+.ph img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;background:#0002}
+.ph .b{padding:6px;display:grid;gap:6px}.ph input{font-size:13px;padding:6px}
+.ph .acts{display:flex;gap:6px}
 .logo{display:grid;gap:6px;justify-items:start}
 .logo img{height:56px;max-width:160px;object-fit:contain;background:#fff;border:1px solid var(--line);border-radius:6px;padding:4px}
 #sig{width:100%;max-width:420px;height:150px;background:#fff;border:1px dashed var(--muted);border-radius:8px;touch-action:none}
@@ -59,6 +64,8 @@ button:disabled{opacity:.5}
 <main id="app"></main>
 <div id="toast" class="toast hide" role="status" aria-live="polite"></div>
 <input id="fileImg" type="file" accept="image/*" class="hide">
+<input id="fileCam" type="file" accept="image/*" capture="environment" class="hide">
+<input id="fileGal" type="file" accept="image/*" multiple class="hide">
 <script>
 "use strict";
 /* ---------- defaults (from the original form) ---------- */
@@ -171,6 +178,12 @@ function renderReport(r){
     <div class="grid2">${WORKS_R.map((f,i)=>`<label for="w_${f[0]}">${f[1]}<input id="w_${f[0]}" data-w="${f[0]}" value="${esc(r.w[f[0]])}"></label><label for="w_${WORKS_L[i][0]}">${WORKS_L[i][1]}<input id="w_${WORKS_L[i][0]}" data-w="${WORKS_L[i][0]}" value="${esc(r.w[WORKS_L[i][0]])}"></label>`).join("")}</div>
   </section>
   <section class="card">
+    <div class="row"><h2 style="flex:1">תמונות (${(r.photos||[]).length})</h2><button class="primary" id="addCam">צלם</button><button id="addGal">מהגלריה</button></div>
+    <div class="photos">${(r.photos||[]).map((p,i)=>`<div class="ph"><img src="${esc(p.src)}" alt="תמונה ${i+1}"><div class="b">
+      <input aria-label="תיאור תמונה ${i+1}" data-pc="${i}" placeholder="תיאור (למשל: פגוש קדמי)" value="${esc(p.caption)}">
+      <div class="acts">${i>0?`<button class="small" data-pm="${i}" aria-label="הזז קדימה">→</button>`:""}<button class="small danger" data-pd="${i}">מחק</button></div></div></div>`).join("")||'<p class="note">עוד אין תמונות. התמונות יצורפו לטופס בעמוד נפרד, 6 בכל עמוד.</p>'}</div>
+  </section>
+  <section class="card">
     <h2>סיום</h2>
     <label for="signDate" style="max-width:220px">תאריך בטופס<input id="signDate" type="date" value="${esc(r.signDate)}"></label>
     <div class="row">
@@ -190,9 +203,15 @@ function renderReport(r){
   $("signDate").onchange=e=>{r.signDate=e.target.value;touch()};
   $("back").onclick=()=>go("list");
   $("pdf").onclick=()=>preview(r);
-  if($("share"))$("share").onclick=()=>Native.shareFile(fileName(r)+".html","text/html",reportHtml(r));
-  $("dup").onclick=()=>{const c=JSON.parse(JSON.stringify(r));c.id=uid();c.createdAt=c.updatedAt=Date.now();c.d.inspection_date=today();c.signDate=today();R[c.id]=c;saveR();go("report",c.id);toast("נוצר עותק")};
-  $("del").onclick=()=>confirmBox("למחוק את השומה? אי אפשר לבטל.",()=>{delete R[r.id];jset("shuma.reports",R);go("list")});
+  if($("share"))$("share").onclick=async()=>{const b=$("share");b.disabled=true;try{Native.shareFile(fileName(r)+".html","text/html",await reportFull(r))}finally{b.disabled=false}};
+  r.photos=r.photos||[];
+  $("addCam").onclick=()=>{photoTarget=r;$("fileCam").click()};
+  $("addGal").onclick=()=>{photoTarget=r;$("fileGal").click()};
+  document.querySelectorAll("[data-pc]").forEach(e=>e.oninput=()=>{r.photos[+e.dataset.pc].caption=e.value;touch()});
+  document.querySelectorAll("[data-pm]").forEach(b=>b.onclick=()=>{const i=+b.dataset.pm;[r.photos[i-1],r.photos[i]]=[r.photos[i],r.photos[i-1]];touch();renderReport(r)});
+  document.querySelectorAll("[data-pd]").forEach(b=>b.onclick=()=>confirmBox("למחוק את התמונה?",()=>{const[p]=r.photos.splice(+b.dataset.pd,1);dropPhoto(p);touch();renderReport(r)}));
+  $("dup").onclick=()=>{const c=JSON.parse(JSON.stringify(r));c.id=uid();c.createdAt=c.updatedAt=Date.now();c.d.inspection_date=today();c.signDate=today();c.photos=[];R[c.id]=c;saveR();go("report",c.id);toast("נוצר עותק (בלי התמונות)")};
+  $("del").onclick=()=>confirmBox("למחוק את השומה? אי אפשר לבטל.",()=>{(r.photos||[]).forEach(dropPhoto);delete R[r.id];jset("shuma.reports",R);go("list")});
   if($("plate"))$("plate").onclick=async()=>{const m=$("nmsg");m.textContent="פותח מצלמה…";
     try{const x=await NB.call("readPlate");if(x.cancelled){m.textContent="";return}
       const d=String(x.plate||"").replace(/\D/g,"");
@@ -206,7 +225,7 @@ function renderReport(r){
 const fileName=r=>`שומת נזקים ${(r.d.license_no||"").replace(/[^\d-]/g,"")} ${heDate(r.d.inspection_date).replace(/\//g,"-")}`.trim();
 
 /* ---------- printed form (A4) ---------- */
-function reportHtml(r){
+function reportHtml(r,pics=[]){
   const v=k=>esc(r.d[k]), dv=k=>esc(heDate(r.d[k]));
   const val=(k,kind)=>kind==="date"?dv(k):v(k);
   const notes=String(S.notes||"").split("\n").map(s=>s.trim()).filter(Boolean);
@@ -229,6 +248,11 @@ th,.lb{background:#dce5f3;color:#1f3b73;font-weight:700;text-align:right}th{text
 .sg{display:flex;justify-content:space-between;align-items:flex-end;margin-top:8px;font-weight:700}.sg .ln{display:inline-block;min-width:45mm;border-bottom:.6pt solid #7f8fa9;text-align:center;font-weight:400;color:#16233d}
 .sg img{height:14mm;max-width:50mm;object-fit:contain;display:block;margin:0 auto -2px}
 .ft{margin-top:auto;border-top:.8pt solid #2f5496;padding-top:3px;justify-content:center}
+.pp{break-before:page;page-break-before:always;width:190mm;margin:0 auto}
+.pp h2{font-size:13pt;margin:0 0 4mm;border-bottom:1.2pt solid #2f5496;padding-bottom:2mm;display:flex;justify-content:space-between}
+.pg2{display:grid;grid-template-columns:1fr 1fr;gap:5mm}
+.pg2 figure{margin:0;break-inside:avoid}.pg2 img{width:100%;height:78mm;object-fit:contain;background:#f1f4f9;border:.6pt solid #7f8fa9;display:block}
+.pg2 figcaption{font-size:9pt;color:#16233d;margin-top:1mm;min-height:4mm}
 </style></head><body><div class="pg">
 <div class="hd">${S.logoRight?`<img class="lr" src="${S.logoRight}" alt="">`:""}<div class="tx"><div class="t1">${esc(S.officeTitle)}</div><div class="ct">${contact}</div></div>${S.logoLeft?`<img class="ll" src="${S.logoLeft}" alt="">`:""}</div>
 <h1>שומת נזקים</h1><div class="sub">${esc(S.subtitle)}</div>
@@ -246,10 +270,20 @@ ${notes.length?`<div class="notes"><b>הערות:</b><ol>${notes.slice(0,half).m
 <div>${S.appraiserName?esc(S.appraiserName):""}${S.license?` · רישיון ${esc(S.license)}`:""}</div>
 <div>חתימת השמאי: <span class="ln">${S.signature?`<img src="${S.signature}" alt="חתימה">`:"&nbsp;"}</span></div></div>
 <div class="ct ft">${contact}</div>
-</div></body></html>`;
+</div>
+${chunk(pics,6).map((g,gi,all)=>`<div class="pp"><h2><span>נספח תמונות${r.d.license_no?` · רכב ${esc(r.d.license_no)}`:""}</span><span style="font-size:9pt;font-weight:400">עמוד ${gi+1} מתוך ${all.length}</span></h2>
+<div class="pg2">${g.map((p,k)=>`<figure><img src="${p.src}" alt=""><figcaption>${gi*6+k+1}. ${esc(p.caption||"")}</figcaption></figure>`).join("")}</div></div>`).join("")}
+</body></html>`;
 }
-function preview(r){
-  const html=reportHtml(r);
+const chunk=(a,n)=>Array.from({length:Math.ceil(a.length/n)},(_,i)=>a.slice(i*n,i*n+n));
+async function toDataUrl(src){if(src.startsWith("data:"))return src;const b=await (await fetch(src)).blob();return await new Promise((res,rej)=>{const f=new FileReader();f.onload=()=>res(f.result);f.onerror=rej;f.readAsDataURL(b)})}
+async function reportFull(r){
+  const pics=[];for(const p of (r.photos||[])){try{pics.push({src:await toDataUrl(p.src),caption:p.caption})}catch{}}
+  return reportHtml(r,pics);
+}
+async function preview(r){
+  const btn=$("pdf");btn.disabled=true;btn.textContent="מכין…";
+  let html;try{html=await reportFull(r)}finally{btn.disabled=false;btn.textContent=native?"הפק PDF / הדפס":"תצוגת הטופס"}
   const ov=document.createElement("div");ov.className="ov";ov.setAttribute("role","dialog");ov.setAttribute("aria-label","תצוגת הטופס");
   ov.innerHTML=`<div class="bar"><span>תצוגת הטופס</span>${native?`<button class="primary" id="pPrint">שמור PDF / הדפס</button><button id="pSave">שמור HTML</button>`:`<button class="primary" id="pPrint">הדפס / PDF</button>`}<button id="pClose">סגור</button></div><iframe title="טופס"></iframe>`;
   document.body.appendChild(ov);
@@ -258,6 +292,30 @@ function preview(r){
   $("pPrint").onclick=()=>{if(native)Native.printHtml(fileName(r),html);else try{fr.contentWindow.print()}catch{toast("ההדפסה לא זמינה כאן")}};
   if($("pSave"))$("pSave").onclick=async()=>{try{const x=await NB.call("saveFile",fileName(r)+".html","text/html",html);toast("נשמר: "+(x.where||""))}catch{toast("השמירה נכשלה")}};
 }
+
+/* ---------- photos ---------- */
+let photoTarget=null;
+async function compressPhoto(file,max=1600,q=.82){
+  let bmp;try{bmp=await createImageBitmap(file,{imageOrientation:"from-image"})}catch{
+    bmp=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(file)})}
+  const sc=Math.min(1,max/Math.max(bmp.width,bmp.height));const cv=document.createElement("canvas");
+  cv.width=Math.round(bmp.width*sc);cv.height=Math.round(bmp.height*sc);cv.getContext("2d").drawImage(bmp,0,0,cv.width,cv.height);
+  return cv.toDataURL("image/jpeg",q);
+}
+async function addPhotos(files){
+  const r=photoTarget;if(!r||!files.length)return;r.photos=r.photos||[];
+  for(const f of files){
+    try{const data=await compressPhoto(f);let p;
+      if(native){const id=Native.saveBlob(data.split(",")[1]);p={id,src:"https://appassets.androidplatform.net/blobs/"+id+".jpg",caption:"",ts:Date.now()}}
+      else p={src:await compressPhoto(f,1000,.7),caption:"",ts:Date.now()};
+      r.photos.push(p);
+    }catch{toast("לא הצלחתי לפתוח את התמונה")}
+  }
+  r.updatedAt=Date.now();saveR();if(view.name==="report"&&view.id===r.id)renderReport(r);
+}
+function dropPhoto(p){if(p&&p.id&&native)try{Native.deleteBlob(String(p.id))}catch{}}
+$("fileCam").onchange=e=>{addPhotos([...e.target.files]);e.target.value=""};
+$("fileGal").onchange=e=>{addPhotos([...e.target.files]);e.target.value=""};
 
 /* ---------- settings ---------- */
 let sigStop=null;
