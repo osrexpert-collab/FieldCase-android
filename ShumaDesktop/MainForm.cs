@@ -20,6 +20,8 @@ public class MainForm : Form
     static readonly string[] PartTypes = { "מקורי", "תואם", "משומש", "חליפי", "" };
     static readonly string[] VatModes = { "כולל מע\"מ", "לא כולל מע\"מ" };
     static readonly Font UiFont = new("Segoe UI", 10f);
+    /// <summary>Editable fields are light yellow, like the marked fields in the office template.</summary>
+    static readonly Color EditBack = Color.FromArgb(255, 249, 214);
     static readonly Font BoldFont = new("Segoe UI", 10f, FontStyle.Bold);
 
     public MainForm()
@@ -31,6 +33,17 @@ public class MainForm : Form
         MinimumSize = new Size(980, 680);
         Size = new Size(1180, 820);
         StartPosition = FormStartPosition.CenterScreen;
+        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+        try
+        {
+            using var st = typeof(MainForm).Assembly.GetManifestResourceStream("logo.png");
+            if (st != null)
+            {
+                var logo = new Bitmap(Image.FromStream(st), new Size(34, 33));
+                bar.Items.Add(new ToolStripLabel(" חוות דעת שמאי ", logo) { Font = BoldFont, ImageScaling = ToolStripItemImageScaling.None, Alignment = ToolStripItemAlignment.Right });
+            }
+        }
+        catch { }
 
         Button(bar, "חדש", (_, _) => NewCase());
         Button(bar, "פתח…", (_, _) => OpenDialog());
@@ -181,7 +194,7 @@ public class MainForm : Form
 
     TextBox Str(Func<string> get, Action<string> set, bool multiline = false, int height = 70)
     {
-        var tb = new TextBox { Text = get() ?? "", Dock = DockStyle.Fill, Multiline = multiline, ScrollBars = multiline ? ScrollBars.Vertical : ScrollBars.None, Margin = new Padding(3) };
+        var tb = new TextBox { Text = get() ?? "", Dock = DockStyle.Fill, Multiline = multiline, ScrollBars = multiline ? ScrollBars.Vertical : ScrollBars.None, Margin = new Padding(3), BackColor = EditBack };
         if (multiline) tb.Height = height;
         tb.TextChanged += (_, _) => { set(tb.Text); Changed(); };
         return tb;
@@ -189,14 +202,14 @@ public class MainForm : Form
 
     TextBox Dec(Func<decimal?> get, Action<decimal?> set)
     {
-        var tb = new TextBox { Text = Num.Plain(get()), Dock = DockStyle.Fill, Margin = new Padding(3), RightToLeft = RightToLeft.No, TextAlign = HorizontalAlignment.Right };
-        tb.TextChanged += (_, _) => { set(Num.Parse(tb.Text)); tb.BackColor = tb.Text.Trim().Length > 0 && Num.Parse(tb.Text) == null ? Color.MistyRose : SystemColors.Window; Changed(); };
+        var tb = new TextBox { Text = Num.Plain(get()), Dock = DockStyle.Fill, Margin = new Padding(3), RightToLeft = RightToLeft.No, TextAlign = HorizontalAlignment.Right, BackColor = EditBack };
+        tb.TextChanged += (_, _) => { set(Num.Parse(tb.Text)); tb.BackColor = tb.Text.Trim().Length > 0 && Num.Parse(tb.Text) == null ? Color.MistyRose : EditBack; Changed(); };
         return tb;
     }
 
     ComboBox Combo(string[] items, Func<string> get, Action<string> set, bool editable = true)
     {
-        var cb = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = editable ? ComboBoxStyle.DropDown : ComboBoxStyle.DropDownList, Margin = new Padding(3) };
+        var cb = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = editable ? ComboBoxStyle.DropDown : ComboBoxStyle.DropDownList, Margin = new Padding(3), BackColor = EditBack };
         cb.Items.AddRange(items);
         var v = get() ?? "";
         if (editable) cb.Text = v; else cb.SelectedItem = items.Contains(v) ? v : items[0];
@@ -389,7 +402,7 @@ public class MainForm : Form
         t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         var nameRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
-        var name = new TextBox { Width = 320, Text = f.Name ?? "", Font = BoldFont };
+        var name = new TextBox { Width = 320, Text = f.Name ?? "", Font = BoldFont, BackColor = EditBack };
         nameRow.Controls.Add(Lbl("שם המוקד", true));
         nameRow.Controls.Add(name);
         nameRow.Controls.Add(Lbl("לדוגמה: נזק בחזית צד ימין, הקדמי, האחורי"));
@@ -473,6 +486,7 @@ public class MainForm : Form
         g.AllowUserToDeleteRows = true;
         g.RowHeadersWidth = 28;
         g.BackgroundColor = Color.White;
+        g.DefaultCellStyle.BackColor = EditBack;
         g.RightToLeft = RightToLeft.Yes;
         g.EnableHeadersVisualStyles = false;
         g.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(237, 237, 237);
@@ -493,6 +507,7 @@ public class MainForm : Form
                  Lbl("אחוז מע\"מ"), Dec(() => data.VatPercent, v => data.VatPercent = v ?? 0));
         Add(sum, Lbl("מע\"מ"), Out(() => Num.Shekel(data.ExpensesVat)),
                  Lbl("סה\"כ כולל מע\"מ", true), Out(() => Num.Shekel(data.ExpensesGross)));
+        Add(sum, Lbl("בדוח להציג"), VatCombo(() => data.ShowVat, v => data.ShowVat = v), new Label(), new Label());
 
         var val = Grid(4);
         Add(val, Lbl("ערך רכב מחירון ₪", true), Dec(() => data.ListValue, v => data.ListValue = v),
@@ -564,6 +579,7 @@ public class MainForm : Form
         Add(g, Lbl("צילומים"), Dec(() => data.FeePhotos, v => data.FeePhotos = v));
         Add(g, Lbl("נסיעות"), Dec(() => data.FeeTravel, v => data.FeeTravel = v));
         Add(g, Lbl("שונות"), Dec(() => data.FeeMisc, v => data.FeeMisc = v));
+        Add(g, Lbl("עיגול (+/-)"), Dec(() => data.FeeRound, v => data.FeeRound = v));
         Add(g, Lbl("סה\"כ ללא מע\"מ", true), Out(() => Num.Shekel(data.FeeNet)));
         Add(g, Lbl("אחוז מע\"מ"), Dec(() => data.FeeVatPercent, v => data.FeeVatPercent = v ?? 0));
         Add(g, Lbl("מע\"מ"), Out(() => Num.Shekel(data.FeeVat)));
@@ -676,6 +692,9 @@ public class MainForm : Form
         Add(g1, Lbl("השכלה והכשרה מקצועית"), T(() => s.Education, v => s.Education = v));
         Add(g1, Lbl("עוסק מורשה מספר"), T(() => s.VatDealerNo, v => s.VatDealerNo = v));
         Add(g1, Lbl("טקסט בתחתית העמוד"), T(() => s.FooterTag, v => s.FooterTag = v));
+        var logoChk = new CheckBox { Text = "להציג את לוגו התוכנה בכותרת הדוח", Checked = s.ShowLogoInReport, AutoSize = true };
+        logoChk.CheckedChanged += (_, _) => s.ShowLogoInReport = logoChk.Checked;
+        Add(g1, Lbl("לוגו"), logoChk);
         Add(g1, Lbl("הערות ברירת מחדל"), T(() => s.DefaultNotes, v => s.DefaultNotes = v, true, 120));
 
         var sigRow = new FlowLayoutPanel { AutoSize = true };

@@ -21,6 +21,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequiredOverridesAllowed=dialog
 WizardStyle=modern
+SetupIconFile=..\ShumaDesktop\app.ico
 ChangesAssociations=yes
 
 [Languages]

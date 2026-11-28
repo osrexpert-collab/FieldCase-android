@@ -35,6 +35,9 @@ public static class Sample
         g.Works.Add(new CostRow { Description = "יישור דלת אחורית שמאל", Cost = 700 });
         g.Parts.Add(new PartRow { Description = "ידית דלת אחורית שמאל", CatalogNo = "1092222-00-A", Type = "תואם", Price = 320 });
         d.Foci.Add(g);
+        var h = new FocusData { Name = "נזק בגג" };
+        h.Paint.Add(new CostRow { Description = "צביעת גג", Cost = 1800 });
+        d.Foci.Add(h);
         d.ValueAdjustments.Add(new ValueRow { Subject = "הפחתה בגין מס' ק\"מ 143,125", Sign = "-", Percent = 4.05m, Amount = 6027, Notes = "ק\"מ משוער ביום האירוע" });
         return d;
     }

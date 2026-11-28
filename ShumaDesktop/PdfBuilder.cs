@@ -14,6 +14,14 @@ public static class PdfBuilder
     const string Line = "#333333";
     const string Soft = "#666666";
 
+    static readonly byte[] Logo = LoadLogo();
+    static byte[] LoadLogo()
+    {
+        using var st = typeof(PdfBuilder).Assembly.GetManifestResourceStream("logo.png");
+        if (st == null) return null;
+        using var ms = new MemoryStream(); st.CopyTo(ms); return ms.ToArray();
+    }
+
     public static void Generate(CaseData d, OfficeSettings s, string path)
     {
         Document.Create(doc =>
@@ -90,12 +98,12 @@ public static class PdfBuilder
 
         // totals of all foci
         Rule(col);
-        Totals(col, new[]
+        Totals(col, d.ShowVat ? new[]
         {
             ("סה\"כ הוצאות", Num.Shekel(d.Expenses), false),
             ($"מע\"מ ({Num.Plain(d.VatPercent)}%[{Num.Words(d.VatPercent)}])", Num.Shekel(d.ExpensesVat), false),
             ("סה\"כ כולל מע\"מ", Num.Shekel(d.ExpensesGross), true)
-        });
+        } : new[] { ("סה\"כ הוצאות (לא כולל מע\"מ)", Num.Shekel(d.Expenses), true) });
         Rule(col);
 
         // summary
@@ -191,12 +199,12 @@ public static class PdfBuilder
             });
         }
         Rule(col);
-        Totals(col, new[]
+        Totals(col, d.ShowVat ? new[]
         {
             ($"סה\"כ נזק למוקד {name}", Num.Shekel(f.Total), true),
             ($"סה\"כ מע\"מ למוקד - {name}", Num.Shekel(d.FocusVat(f)), false),
             ($"סה\"כ נזק כולל מע\"מ למוקד - {name}", Num.Shekel(f.Total + d.FocusVat(f)), true)
-        });
+        } : new[] { ($"סה\"כ נזק למוקד {name}", Num.Shekel(f.Total), true) });
     }
 
     static void DepreciationOpinion(ColumnDescriptor col, CaseData d, OfficeSettings s)
@@ -275,6 +283,7 @@ public static class PdfBuilder
             R("צילומים:", d.FeePhotos, false, false);
             R("נסיעות:", d.FeeTravel, false, false);
             R("שונות:", d.FeeMisc, false, false);
+            if (d.FeeRound is decimal fr && fr != 0) R("עיגול:", d.FeeRound, false, false);
             R("סה\"כ ללא מע\"מ:", d.FeeNet, false, true);
             R($"מע\"מ לפי: ({Num.Plain(d.FeeVatPercent)}%)", d.FeeVat, false, false);
             R("סה\"כ כולל מע\"מ:", d.FeeGross, true, true);
@@ -324,13 +333,18 @@ public static class PdfBuilder
         page.ContentFromRightToLeft();
         page.PageColor(Colors.White);
         page.DefaultTextStyle(x => x.FontFamily(Font).FontSize(10).FontColor(Colors.Black));
-        page.Header().BorderBottom(0.8f).BorderColor(Line).PaddingBottom(6).Column(c =>
+        page.Header().BorderBottom(0.8f).BorderColor(Line).PaddingBottom(6).Row(hr =>
         {
+          if (s.ShowLogoInReport && Logo != null) hr.ConstantItem(60).AlignMiddle().Image(Logo).FitArea();
+          hr.RelativeItem().Column(c =>
+          {
             c.Item().AlignCenter().Text(s.OfficeName ?? "").Bold().FontSize(12);
             if (!string.IsNullOrWhiteSpace(s.AppraiserName)) c.Item().AlignCenter().Text(s.AppraiserName);
             if (!string.IsNullOrWhiteSpace(s.Address)) c.Item().AlignCenter().Text(s.Address);
             var contact = string.Join("  -  ", new[] { s.Email, Prefix("פקס ", s.Fax), Prefix("נייד ", s.Mobile) }.Where(x => !string.IsNullOrWhiteSpace(x)));
             c.Item().AlignCenter().Text(contact).FontSize(9);
+          });
+          if (s.ShowLogoInReport && Logo != null) hr.ConstantItem(60);
         });
         page.Footer().BorderTop(0.6f).BorderColor(Line).PaddingTop(3).Text(t =>
         {

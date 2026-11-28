@@ -101,6 +101,7 @@ public class CaseData
     // damage
     public List<FocusData> Foci { get; set; } = new() { new FocusData() };
     public decimal VatPercent { get; set; } = 18;
+    public bool ShowVat { get; set; } = true;
 
     // actual vehicle value
     public decimal? ListValue { get; set; }
@@ -122,6 +123,7 @@ public class CaseData
     public decimal? FeePhotos { get; set; }
     public decimal? FeeTravel { get; set; }
     public decimal? FeeMisc { get; set; }
+    public decimal? FeeRound { get; set; }
     public decimal FeeVatPercent { get; set; } = 18;
 
     public bool IncludePhotos { get; set; } = true;
@@ -142,7 +144,7 @@ public class CaseData
     [JsonIgnore] public decimal? RawPercent => ActualValue is > 0 ? Math.Round((RawIncludesVat ? ExpensesGross : Expenses) / ActualValue.Value * 100m, 2) : null;
     [JsonIgnore] public decimal? DeprAmount => ActualValue is decimal v && DeprPercent is decimal p ? Math.Round(v * p / 100m, 2) : null;
 
-    [JsonIgnore] public decimal FeeNet => (FeeMain ?? 0) + (FeePhotos ?? 0) + (FeeTravel ?? 0) + (FeeMisc ?? 0);
+    [JsonIgnore] public decimal FeeNet => (FeeMain ?? 0) + (FeePhotos ?? 0) + (FeeTravel ?? 0) + (FeeMisc ?? 0) + (FeeRound ?? 0);
     [JsonIgnore] public decimal FeeVat => Math.Round(FeeNet * FeeVatPercent / 100m, 2);
     [JsonIgnore] public decimal FeeGross => FeeNet + FeeVat;
 }
@@ -159,6 +161,7 @@ public class OfficeSettings
     public string Education { get; set; } = "";
     public string VatDealerNo { get; set; } = "307233882";
     public string FooterTag { get; set; } = "חוות דעת";
+    public bool ShowLogoInReport { get; set; } = false;
     public string SignaturePngBase64 { get; set; } = "";
     public string DefaultNotes { get; set; } =
         "חוות דעתנו בוצעה בטרם בוצעו התיקונים בפועל ואינה כוללת את הנזקים הסמויים בשלב זה של הבדיקה.\r\n" +
