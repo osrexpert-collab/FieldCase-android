@@ -379,16 +379,73 @@ public class MainForm : Form
     }
 
     // ---------- tab: texts ----------
+    static readonly Font TextFont = new("Segoe UI", 12f);
+
+    static readonly string[] IntroPhrases =
+    {
+        "המבוטח פנה למשרדינו וביקש לסכם את התביעה על בסיס גלובלי (נזק מוסכם).",
+        "לאור האמור לעיל, חוות דעתנו סוכמה על בסיס ערך נזק מוסכם כולל מע\"מ.",
+        "כל מחירי העבודות והחלקים הכלולים באומדן הנזק בחוות דעתנו נכונים ליום בדיקתנו.",
+        "הרכב תוקן בפועל במוסך המצוין לעיל, וחוות דעתנו נערכה לפי החשבוניות שהוצגו בפנינו.",
+        "לאור היקף הנזק, הרכב הוכרז כאובדן להלכה.",
+        "לאור היקף הנזק, הרכב הוכרז כאובדן מוחלט.",
+    };
+    static readonly string[] CircPhrases =
+    {
+        "הרכב המצוין לעיל נפגע בחלקו הקדמי.",
+        "הרכב המצוין לעיל נפגע בחלקו האחורי.",
+        "הרכב המצוין לעיל נפגע בחלקו הימני.",
+        "הרכב המצוין לעיל נפגע בחלקו השמאלי.",
+        "ראה תיאור האירוע: כתוצאה מפגיעה בו של צד ג'.",
+        "ראה תיאור האירוע: כתוצאה מפגיעה ברכב אחר.",
+        "ראה תיאור האירוע: כתוצאה מפגיעה בעצם דומם.",
+        "ראה תיאור האירוע: הרכב נפגע בעת שעמד בחניה.",
+    };
+    static readonly string[] DamagePhrases =
+    {
+        "בהתאם לבקשתך/כם בדקנו את המכונית הנדונה כפי שהוצגה בפנינו.",
+        "החלקים המפורטים בחלקים ניזוקו, יצאו מכלל שימוש.",
+        "החלקים הניזוקים ניתנים לתיקון ולא נדרשת החלפתם.",
+        "הנזקים תואמים את נסיבות האירוע כפי שתוארו בפנינו.",
+        "לא נמצאו נזקים קודמים באזור הפגיעה.",
+    };
+
+    /// <summary>A section of the texts tab: title, a short caption, a large full-width text box and a list of ready phrases.</summary>
+    void TextBlock(FlowLayoutPanel root, string title, string caption, Func<string> get, Action<string> set, string[] phrases, int height)
+    {
+        root.Controls.Add(Section(title));
+        root.Controls.Add(new Label { Text = caption, AutoSize = true, ForeColor = Color.DimGray, Padding = new Padding(0, 0, 0, 4) });
+        var tb = Str(get, set, true, height);
+        tb.Font = TextFont; tb.WordWrap = true; tb.AcceptsReturn = true; tb.Dock = DockStyle.None;
+        var bar = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 0) };
+        var pick = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 560, DropDownWidth = 760 };
+        pick.Items.AddRange(phrases);
+        var ins = new System.Windows.Forms.Button { Text = "+ הוסף נוסח", AutoSize = true, BackColor = Color.FromArgb(247, 201, 72) };
+        ins.Click += (_, _) =>
+        {
+            if (pick.SelectedItem is not string ph) { pick.DroppedDown = true; return; }
+            var t = tb.Text; int at = tb.SelectionStart;
+            var sep = at > 0 && !char.IsWhiteSpace(t[at - 1]) ? " " : "";
+            tb.Text = t.Insert(at, sep + ph); tb.SelectionStart = at + sep.Length + ph.Length; tb.Focus();
+        };
+        var clr = new System.Windows.Forms.Button { Text = "נקה", AutoSize = true };
+        clr.Click += (_, _) => { if (tb.Text.Length == 0) return; if (MessageBox.Show(this, $"למחוק את כל הטקסט ב\"{title}\"?", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2, MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign) == DialogResult.Yes) tb.Clear(); };
+        bar.Controls.Add(new Label { Text = "נוסחים מוכנים:", AutoSize = true, Padding = new Padding(0, 6, 0, 0) });
+        bar.Controls.Add(pick); bar.Controls.Add(ins); bar.Controls.Add(clr);
+        root.Controls.Add(bar);
+        root.Controls.Add(tb);
+    }
+
     TabPage TextsTab()
     {
         var page = Page("מבוא ונסיבות");
         var root = Root();
-        root.Controls.Add(Section("מבוא"));
-        root.Controls.Add(Str(() => data.Intro, v => data.Intro = v, true, 90));
-        root.Controls.Add(Section("נסיבות המקרה"));
-        root.Controls.Add(Str(() => data.Circumstances, v => data.Circumstances = v, true, 70));
-        root.Controls.Add(Section("תיאור הנזקים"));
-        root.Controls.Add(Str(() => data.DamageDescription, v => data.DamageDescription = v, true, 70));
+        TextBlock(root, "מבוא", "על איזה בסיס סוכמה חוות הדעת (נזק מוסכם, תיקון בפועל, אובדן) ולאיזה יום נכונים המחירים.",
+                  () => data.Intro, v => data.Intro = v, IntroPhrases, 170);
+        TextBlock(root, "נסיבות המקרה", "באיזה חלק נפגע הרכב ואיך קרה האירוע. השלם את המקום המסומן _____.",
+                  () => data.Circumstances, v => data.Circumstances = v, CircPhrases, 150);
+        TextBlock(root, "תיאור הנזקים", "מה נבדק ומה מצב החלקים הניזוקים. פירוט העבודות והחלקים נמצא בלשונית \"מוקדי נזק\".",
+                  () => data.DamageDescription, v => data.DamageDescription = v, DamagePhrases, 150);
         page.Controls.Add(root);
         return page;
     }
