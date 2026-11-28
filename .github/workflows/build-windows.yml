@@ -55,3 +55,11 @@ jobs:
         with:
           name: ShumaDesktop-Setup
           path: output/ShumaDesktop-Setup.exe
+
+      - name: Publish the installer as a public download (no GitHub login needed)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete shuma-desktop-latest --cleanup-tag -y 2>$null
+          gh release create shuma-desktop-latest output/ShumaDesktop-Setup.exe --target ${{ github.sha }} --title "ShumaDesktop ${{ env.APP_VERSION }}" --notes "Windows installer" --latest
