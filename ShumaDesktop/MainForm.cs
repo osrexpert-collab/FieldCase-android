@@ -53,6 +53,8 @@ public class MainForm : Form
         var addF = Button(bar, "+ הוסף מוקד נזק", (_, _) => AddFocus());
         addF.Font = BoldFont; addF.BackColor = Color.FromArgb(247, 201, 72);
         bar.Items.Add(new ToolStripSeparator());
+        var chk = Button(bar, "✔ בדיקה לפני הדפסה", (_, _) => CheckBeforePrint());
+        chk.Font = BoldFont; chk.ForeColor = Color.DarkGreen;
         var pdf = Button(bar, "הפק PDF", (_, _) => MakePdf());
         pdf.Font = BoldFont; pdf.ForeColor = Color.DarkBlue;
 
@@ -132,6 +134,61 @@ public class MainForm : Form
             Process.Start(new ProcessStartInfo(d.FileName) { UseShellExecute = true });
         }
         catch (Exception ex) { Msg("הפקת ה-PDF נכשלה:\n" + ex.Message, MessageBoxIcon.Error); }
+        finally { Cursor = Cursors.Default; }
+    }
+
+    /// <summary>Lists missing or suspicious details, then opens a preview of the report without saving it.</summary>
+    void CheckBeforePrint()
+    {
+        Validate();
+        var miss = new List<string>();
+        void Need(string v, string name) { if (string.IsNullOrWhiteSpace(v)) miss.Add(name); }
+        Need(data.OpinionNo, "מספר חוות דעת");
+        Need(data.DocDate, "תאריך");
+        Need(data.ToName, "לכבוד");
+        Need(data.InsuredName, "שם המבוטח");
+        Need(data.Insurer, "חברת ביטוח");
+        Need(data.EventDate, "תאריך אירוע");
+        Need(data.InspectionDate, "תאריך בדיקה");
+        Need(data.LicenseNo, "מספר רישוי");
+        Need(data.Manufacturer, "יצרן");
+        Need(data.Model, "דגם");
+        Need(data.Year, "שנת ייצור");
+        Need(data.Odometer, "מד אוץ");
+        Need(data.OwnerName, "שם בעל הרכב");
+        if (data.Circumstances.Contains("_____")) miss.Add("נסיבות המקרה – לא הושלם החלק הפגוע (_____)");
+        for (int i = 0; i < data.Foci.Count; i++)
+        {
+            var f = data.Foci[i]; var n = $"מוקד {i + 1}";
+            if (string.IsNullOrWhiteSpace(f.Name)) miss.Add($"{n} – שם המוקד");
+            if (f.Total == 0) miss.Add($"{n} – אין עבודות, צבע או חלקים עם סכום");
+            foreach (var w in f.Works) if (!string.IsNullOrWhiteSpace(w.Description) && w.Cost == null) miss.Add($"{n} – עבודה \"{w.Description}\" ללא סכום");
+            foreach (var w in f.Paint) if (!string.IsNullOrWhiteSpace(w.Description) && w.Cost == null) miss.Add($"{n} – צבע \"{w.Description}\" ללא סכום");
+            foreach (var pr in f.Parts) if (!string.IsNullOrWhiteSpace(pr.Description) && pr.Price == null) miss.Add($"{n} – חלק \"{pr.Description}\" ללא מחיר");
+        }
+        if (data.ListValue == null) miss.Add("ערך רכב (מחירון)");
+        if (data.IncludeDepreciation && data.DeprPercent == null) miss.Add("ירידת ערך – אחוז");
+        if (data.IncludeFee && data.FeeMain == null) miss.Add("שכר טרחה");
+        if (data.IncludePhotos && data.Photos.Count == 0) miss.Add("תמונות – סומן לצרף אך לא נוספו תמונות");
+        if (string.IsNullOrWhiteSpace(settings.AppraiserName)) miss.Add("הגדרות – שם השמאי");
+        if (string.IsNullOrWhiteSpace(settings.SignaturePngBase64)) miss.Add("הגדרות – תמונת חתימה");
+
+        string text = miss.Count == 0
+            ? "הבדיקה עברה – כל הפרטים העיקריים מולאו.\n\nלפתוח תצוגה מקדימה של הדוח?"
+            : "חסרים או לא הושלמו הפרטים הבאים:\n\n• " + string.Join("\n• ", miss.Take(25)) +
+              (miss.Count > 25 ? $"\n… ועוד {miss.Count - 25}" : "") + "\n\nלפתוח בכל זאת תצוגה מקדימה של הדוח?";
+        var r = MessageBox.Show(this, text, "בדיקה לפני הדפסה", MessageBoxButtons.YesNo,
+            miss.Count == 0 ? MessageBoxIcon.Information : MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button1, MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign);
+        if (r != DialogResult.Yes) return;
+        try
+        {
+            Cursor = Cursors.WaitCursor;
+            var tmp = Path.Combine(Path.GetTempPath(), "ShumaDesktop-preview-" + DateTime.Now.ToString("HHmmss") + ".pdf");
+            PdfBuilder.Generate(data, settings, tmp);
+            Process.Start(new ProcessStartInfo(tmp) { UseShellExecute = true });
+        }
+        catch (Exception ex) { Msg("התצוגה המקדימה נכשלה:\n" + ex.Message, MessageBoxIcon.Error); }
         finally { Cursor = Cursors.Default; }
     }
 
