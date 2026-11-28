@@ -138,8 +138,7 @@ public static class PdfBuilder
         var works = f.Works.Where(w => !string.IsNullOrWhiteSpace(w.Description) || w.Cost != null).ToList();
         if (works.Count > 0)
         {
-            SectionBox(col, "עבודות");
-            col.Item().Table(t =>
+            Section(col, "עבודות", t =>
             {
                 t.ColumnsDefinition(c => { c.RelativeColumn(); c.ConstantColumn(100); });
                 t.Header(h => { h.Cell().Text("תיאור עבודה").Bold(); h.Cell().Text("עלות עבודה").Bold(); });
@@ -155,8 +154,7 @@ public static class PdfBuilder
         var paint = f.Paint.Where(w => !string.IsNullOrWhiteSpace(w.Description) || w.Cost != null).ToList();
         if (paint.Count > 0)
         {
-            SectionBox(col, "צבע");
-            col.Item().Table(t =>
+            Section(col, "צבע", t =>
             {
                 t.ColumnsDefinition(c => { c.RelativeColumn(); c.ConstantColumn(100); });
                 foreach (var w in paint)
@@ -171,8 +169,7 @@ public static class PdfBuilder
         var parts = f.Parts.Where(p => !string.IsNullOrWhiteSpace(p.Description) || p.Price != null).ToList();
         if (parts.Count > 0)
         {
-            SectionBox(col, "חלקי חילוף");
-            col.Item().Table(t =>
+            Section(col, "חלקי חילוף", t =>
             {
                 t.ColumnsDefinition(c => { c.RelativeColumn(3); c.RelativeColumn(2); c.ConstantColumn(60); c.ConstantColumn(100); });
                 t.Header(h =>
@@ -354,8 +351,13 @@ public static class PdfBuilder
     static void BoxTitle(ColumnDescriptor c, string text) =>
         c.Item().PaddingBottom(6).AlignRight().Border(0.8f).BorderColor(Line).PaddingHorizontal(10).PaddingVertical(1).Text(text).FontSize(13);
 
-    static void SectionBox(ColumnDescriptor col, string text) =>
-        col.Item().EnsureSpace(150).PaddingTop(8).AlignRight().MinWidth(110).Border(0.8f).BorderColor(Line).PaddingHorizontal(8).PaddingVertical(1).Text(text).FontSize(13);
+    /// <summary>Section title box and its table as one block, so a title is never left alone at the bottom of a page.</summary>
+    static void Section(ColumnDescriptor col, string title, Action<TableDescriptor> table) =>
+        col.Item().EnsureSpace(150).Column(sc =>
+        {
+            sc.Item().PaddingTop(8).PaddingBottom(4).AlignRight().MinWidth(110).Border(0.8f).BorderColor(Line).PaddingHorizontal(8).PaddingVertical(1).Text(title).FontSize(13);
+            sc.Item().Table(table);
+        });
 
     static void KV(ColumnDescriptor c, (string, string)[] rows) =>
         c.Item().Table(t =>
