@@ -649,14 +649,15 @@ public class MainForm : Form
 
         var adjBar = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
         var addRow = new System.Windows.Forms.Button { Text = "+ הוסף שורה", AutoSize = true, BackColor = Color.FromArgb(247, 201, 72) };
-        var delRow = new System.Windows.Forms.Button { Text = "− מחק שורה", AutoSize = true };
+        var delRow = new System.Windows.Forms.Button { Text = "− מחק שורה", AutoSize = true, BackColor = Color.FromArgb(255, 228, 225) };
         var rowsInfo = new Label { AutoSize = true, ForeColor = Color.DimGray, Padding = new Padding(8, 7, 0, 0) };
         void FitAdj()
         {
             int n = data.ValueAdjustments.Count;
             adj.Height = adj.ColumnHeadersHeight + n * adj.RowTemplate.Height + 4;
-            addRow.Enabled = n < MaxAdj; delRow.Enabled = n > 1;
-            rowsInfo.Text = $"{n} מתוך {MaxAdj} שורות";
+            addRow.Enabled = n < MaxAdj;
+            delRow.Text = n > 1 ? "− מחק שורה" : "− נקה שורה";
+            rowsInfo.Text = $"{n} מתוך {MaxAdj} שורות. למחיקה: לחץ על השורה ואז על \"מחק שורה\".";
         }
         addRow.Click += (_, _) =>
         {
@@ -668,11 +669,16 @@ public class MainForm : Form
         };
         delRow.Click += (_, _) =>
         {
-            if (data.ValueAdjustments.Count <= 1) return;
             adj.EndEdit();
             int i = adj.CurrentRow?.Index ?? data.ValueAdjustments.Count - 1;
             if (i < 0 || i >= data.ValueAdjustments.Count) i = data.ValueAdjustments.Count - 1;
-            data.ValueAdjustments.RemoveAt(i);
+            var row = data.ValueAdjustments[i];
+            bool has = !string.IsNullOrWhiteSpace(row.Subject) || row.Percent != null || row.Amount != null || !string.IsNullOrWhiteSpace(row.Notes);
+            if (has && MessageBox.Show(this, $"למחוק את שורה {i + 1}" + (string.IsNullOrWhiteSpace(row.Subject) ? "" : $" (\"{row.Subject}\")") + "?", Text,
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2, MessageBoxOptions.RtlReading | MessageBoxOptions.RightAlign) != DialogResult.Yes) return;
+            if (data.ValueAdjustments.Count > 1) data.ValueAdjustments.RemoveAt(i);
+            else { data.ValueAdjustments[0] = new ValueRow(); }
+            adj.Refresh();
             FitAdj(); Changed();
             foreach (var r in recalcs) r();
         };
