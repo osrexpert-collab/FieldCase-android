@@ -25,7 +25,6 @@ SetupIconFile=..\ShumaDesktop\app.ico
 WizardImageFile=wizard.bmp,wizard@2x.bmp
 WizardSmallImageFile=wizard-small.bmp,wizard-small@2x.bmp
 WizardImageStretch=no
-WizardImageBackColor=$FFFFFF
 ChangesAssociations=yes
 
 [Languages]
